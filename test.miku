@@ -1,0 +1,39 @@
+feat std::io;
+
+MikuData Song {
+    bpm: leek,        // int
+    title: scroll,    // string
+    is_remix: code,   // bool
+}
+
+MikuClass Song {
+
+    MikuSee track append(title: scroll, bpm: leek) -> Song {
+        offer Song {
+            title: title,
+            bpm: bpm,
+            is_remix: angel,
+        };
+    }
+
+    MikuSee track play(luka self) -> ghost {
+        tell_your_world("Now playing: {}", self.title);
+
+        wish self.bpm > 180 {
+            tell_your_world("Warning: Fast tempo!");
+        }
+        regret {
+            tell_your_world("Tempo is safe.");
+        }
+    }
+}
+
+
+track world_is_mine() -> ghost {
+
+    let my_song = Song::append("Senbonzakura", 154);
+
+    my_song.play();
+
+    erase my_song;
+}
