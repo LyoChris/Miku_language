@@ -1,9 +1,9 @@
 feat std::io;
 
 MikuData Song {
-    bpm: leek,        // int
-    title: scroll,    // string
-    is_remix: code,   // bool
+    bpm: leek,        
+    title: scroll,    
+    is_remix: code,   
 }
 
 MikuClass Song {
@@ -29,11 +29,12 @@ MikuClass Song {
 }
 
 
-track world_is_mine() -> ghost {
-
+track run() -> ghost {
     let my_song = Song::append("Senbonzakura", 154);
-
     my_song.play();
-
     erase my_song;
+}
+
+track world_is_mine() -> ghost {
+    run();
 }
