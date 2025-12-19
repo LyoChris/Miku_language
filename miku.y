@@ -175,7 +175,7 @@ stmt_list_no_decls:
     ;
 
 stmt_no_decl:
-      assign_stmt
+      assign_stmt   
     | expr_stmt
     | if_stmt
     | while_stmt
@@ -205,12 +205,12 @@ assign_stmt:
     ;
 
 if_stmt:
-      WISH expression block_no_decls
-    | WISH expression block_no_decls REGRET block_no_decls
+      WISH '(' expression ')' block_no_decls
+    | WISH '(' expression ')' block_no_decls REGRET block_no_decls
     ;
 
 while_stmt:
-      ROLLING expression block_no_decls
+      ROLLING '(' expression ')' block_no_decls
     ;
 
 block_no_decls:
@@ -227,7 +227,7 @@ continue_stmt:
 
 return_stmt:
       OFFER expression ';'
-    | OFFER struct_init ';'
+    | OFFER ';'
     ;
 
 delete_stmt:
@@ -326,5 +326,7 @@ int main(int argc, char** argv)
         }
     }
     yyparse();
+
+    printf("Completed successfully.\n");
     return 0;
 }

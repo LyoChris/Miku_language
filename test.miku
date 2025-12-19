@@ -19,7 +19,7 @@ MikuClass Song {
     MikuSee track play(luka self) -> ghost {
         tell_your_world("Now playing: {}", self.title);
 
-        wish self.bpm > 180 {
+        wish ( self.bpm > 180 ) {
             tell_your_world("Warning: Fast tempo!");
         }
         regret {
