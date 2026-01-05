@@ -1,40 +1,137 @@
-feat std::io;
+// Miku Language - complex spec-compliant test
+// Notes:
+// - Only assignment (:=) and tell_your_world(expr) produce ASTs and are evaluated in main.
+// - Function/method calls and field access used in expressions become OTHER leaves and evaluate to default values.
+//   That means add(1,2) (returns int) evaluates as 0 in expressions, by spec.
+
+// ---------- Global declarations ----------
+
+leek gCounter := 7;
+tempo gTempo := 120.5;
+lyric gTitle := "World is Mine";
+voice gFlag := true;
+
+// Classes can only be defined in global scope.
+MikuData Vocaloid {
+    lyric name;
+    leek  age;
+    voice active;
+
+    track greet(who: lyric) -> lyric {
+        lyric msg := "Hi";
+        if (gFlag) {
+            tell_your_world(msg);
+        } else {
+            tell_your_world(who);
+        }
+        offer msg;
+    }
+
+    track years_from(now: leek) -> leek {
+        leek diff := now - age;
+        offer diff;
+    }
+};
 
 MikuData Song {
-    bpm: leek,        
-    title: scroll,    
-    is_remix: code,   
+    lyric title;
+    tempo length;
+    leek  bpm;
+
+    track is_fast(limit: leek) -> voice {
+        voice res := true;
+        while (res && (bpm > limit)) {
+            tell_your_world(title);
+            offer res;
+        }
+        offer res;
+    }
+};
+
+// Functions in global scope.
+track add(a: leek, b: leek) -> leek {
+    leek s := a + b;
+    offer s;
 }
 
-MikuClass Song {
+track eq_str(a: lyric, b: lyric) -> voice {
+    voice ok := (a == b);
+    offer ok;
+}
 
-    MikuSee track append(title: scroll, bpm: leek) -> Song {
-        offer Song {
-            title: title,
-            bpm: bpm,
-            is_remix: angel,
-        };
+track mix_flags(a: voice, b: voice) -> voice {
+    voice r := a && b;
+    offer r;
+}
+
+track complex_math(x: leek, y: leek) -> leek {
+    leek r := (x * 2) + (y * 3) - (x % 5);
+    offer r;
+}
+
+Vocaloid miku;
+Song song1;
+
+// ---------- Main block (NO declarations allowed here) ----------
+world_is_mine {
+
+    // Prints of globals (evaluated)
+    tell_your_world(gTitle);
+    tell_your_world(gCounter);
+    tell_your_world(gTempo);
+    tell_your_world(gFlag);
+
+    // Assignments (evaluated)
+    gCounter := gCounter + 10;
+    tell_your_world(gCounter);
+
+    // Object creation is OTHER leaf; assigns default <Class> placeholder by eval
+    miku := summon Vocaloid();
+    song1 := summon Song();
+
+    // Field access is OTHER leaf; returns default for field type
+    tell_your_world(miku.name);     // default string => ""
+    tell_your_world(song1.bpm);     // default int => 0
+    tell_your_world(song1.length);  // default float => 0.0
+
+    // Function call is OTHER leaf:
+    // add(1,2) returns leek -> evaluates as 0; expression prints 5
+    tell_your_world(add(1, 2) + 5);
+
+    // Method call is OTHER leaf:
+    tell_your_world(miku.years_from(2026)); // default int => 0
+
+    // Chained boolean logic
+    gFlag := (gCounter > 10) && (gCounter < 100);
+    tell_your_world(gFlag);
+
+    // if/while statements are parsed + type-checked, but have NULL AST and are not executed by evaluator
+    if (gFlag) {
+        tell_your_world("Inside if (not executed)"); // inside if => not evaluated
+    } else {
+        tell_your_world("Else (not executed)");
     }
 
-    MikuSee track play(luka self) -> ghost {
-        tell_your_world("Now playing: {}", self.title);
-
-        wish ( self.bpm > 180 ) {
-            tell_your_world("Warning: Fast tempo!");
-        }
-        regret {
-            tell_your_world("Tempo is safe.");
-        }
+    while (gCounter < 25) {
+        gCounter := gCounter + 1;      // not evaluated (inside while)
+        tell_your_world(gCounter);     // not evaluated
     }
-}
 
+    // More expression building (evaluated)
+    tell_your_world((3 + 4) * 5);
+    tell_your_world((10 % 4) + 1);
 
-track run() -> ghost {
-    let my_song = Song::append("Senbonzakura", 154);
-    my_song.play();
-    erase my_song;
-}
+    // String comparisons (==, != allowed for same-type)
+    tell_your_world(eq_str("miku", "miku")); // OTHER leaf => bool default false
+    tell_your_world("miku" == "miku");       // evaluated => true
+    tell_your_world("miku" != "rin");        // evaluated => true
 
-track world_is_mine() -> ghost {
-    run();
+    // Complex math call OTHER leaf (returns int default 0), still type-checked args:
+    tell_your_world(complex_math(10, 20));
+
+    // Logical function call OTHER leaf (returns bool default false)
+    tell_your_world(mix_flags(true, false));
+
+    // Negative test (keep commented for passing run):
+    // tell_your_world(miku.nonexistent); // should emit semantic error
 }

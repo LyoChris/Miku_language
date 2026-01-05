@@ -1,14 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Clean up old files
-rm -f miku miku.tab.c lex.yy.c miku.tab.h tables.txt
+# convert CRLF -> LF if dos2unix exists
+if command -v dos2unix >/dev/null 2>&1; then
+  dos2unix miku.l miku.y >/dev/null 2>&1 || true
+fi
 
-# Generate the Parser
-bison -d -Wcounterexamples miku.y
+rm -f miku.tab.* miku.yy.* lex.yy.* y.tab.* miku
 
-# Generate the Lexer
-flex miku.l
+bison -d -o miku.tab.cpp --defines=miku.tab.hpp miku.y
+flex  -o miku.yy.cpp miku.l
 
-# Compile everything using g++ 
-# REMOVED -lfl because we define our own main and use %option noyywrap
-g++ -o miku miku.tab.c lex.yy.c miku_impl.cpp
+g++ -std=c++17 -O2 -Wall -Wextra -o miku \
+  miku_impl.cpp miku.tab.cpp miku.yy.cpp

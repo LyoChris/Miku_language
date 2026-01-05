@@ -1,71 +1,137 @@
+%option noyywrap nodefault yylineno
+
 %{
-#include <iostream>
-#include <string>
-#include <cstring>
 #include "miku_ast.h"
-#include "miku.tab.h"
-using namespace std;
+#include "miku.tab.hpp"
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
+static char* dup_yytext() {
+    size_t n = std::strlen(yytext);
+    char* s = (char*)std::malloc(n + 1);
+    std::memcpy(s, yytext, n + 1);
+    return s;
+}
+
+static std::string unescape_string(const char* in) {
+    std::string s(in);
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {
+        s = s.substr(1, s.size() - 2);
+    }
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            char c = s[++i];
+            switch (c) {
+                case 'n': out.push_back('\n'); break;
+                case 't': out.push_back('\t'); break;
+                case 'r': out.push_back('\r'); break;
+                case '\\': out.push_back('\\'); break;
+                case '"': out.push_back('"'); break;
+                default: out.push_back(c); break;
+            }
+        } else {
+            out.push_back(s[i]);
+        }
+    }
+    return out;
+}
 %}
 
-%option noyywrap
-%option yylineno
+%x COMMENT
+
+WS      [ \t\r]+
+NL      \n+
+IDRE    [A-Za-z_][A-Za-z0-9_]*
+INT     [0-9]+
+FLOAT   ([0-9]+"."[0-9]*|[0-9]*"."[0-9]+)([eE][+-]?[0-9]+)?
+STR     \"([^\\\"]|\\.)*\"
 
 %%
 
-"feat"              { return FEAT; }
+{WS}            { }
+{NL}            { }
 
-"MikuData"          { return MIKUDATA; }
-"MikuClass"         { return MIKUCLASS; }
-"MikuSee"           { return MIKUSEE; }
-"MikuBlind"         { return MIKUBLIND; }
+"//".*          { }
 
-"track"             { return TRACK; }
-"let"               { return LET; }
+"/*"            { BEGIN(COMMENT); }
+<COMMENT>"*/"   { BEGIN(INITIAL); }
+<COMMENT>{NL}   { }
+<COMMENT>.      { }
+<COMMENT><<EOF>> { std::fprintf(stderr, "[LEX] Unterminated /* */ comment at EOF (line %d)\n", yylineno); return 0; }
 
-"wish"              { return WISH; }
-"regret"            { return REGRET; }
-"rolling"           { return ROLLING; }
-"vanish"            { return VANISH; }
-"step"              { return STEP; }
+"leek"            { return KW_INT; }
+"tempo"           { return KW_FLOAT; }
+"lyric"           { return KW_STRING; }
+"voice"           { return KW_BOOL; }
 
-"offer"             { return OFFER; }
-"erase"             { return ERASE; }
+"MikuData"        { return KW_CLASS; }
+"track"           { return KW_FUNC; }
+"world_is_mine"   { return KW_MAIN; }
+"offer"           { return KW_RETURN; }
+"if"              { return KW_IF; }
+"else"            { return KW_ELSE; }
+"while"           { return KW_WHILE; }
+"summon"          { return KW_NEW; }
 
-"tell_your_world"   { return PRINT; }
+"tell_your_world" { return KW_PRINT; }
 
-"world_is_mine"     { return MAIN; }
+"true"            { yylval.bval = 1; return BOOL_LIT; }
+"false"           { yylval.bval = 0; return BOOL_LIT; }
 
-"leek"              { return TYPE_LEEK; }
-"scroll"            { return TYPE_SCROLL; }
-"code"              { return TYPE_CODE; }
-"ghost"             { return TYPE_GHOST; }
-"rin"               { return TYPE_RIN; }
-"len"               { return TYPE_LEN; }
-"luka"              { return LUKA_PTR; }
+":="              { return ASSIGN; }
+"->"              { return ARROW; }
 
-"angel"             { yylval.bval = true; return BOOL_TRUE; }
-"virus"             { yylval.bval = false; return BOOL_FALSE; }
-"self"              { return SELF; }
+"=="              { return EQ; }
+"!="              { return NEQ; }
+"<="              { return LE; }
+">="              { return GE; }
+"<"               { return LT; }
+">"               { return GT; }
 
-[0-9]+\.[0-9]+[fF]      { yylval.fval = atof(yytext); return LITERAL_RIN; }
-[0-9]+\.[0-9]+          { yylval.fval = atof(yytext); return LITERAL_LEN; }
-[0-9]+                  { yylval.ival = atoi(yytext); return INT_LITERAL; }
+"&&"              { return AND; }
+"||"              { return OR; }
+"!"               { return NOT; }
 
-\"([^\"\\]|\\.)*\"      { yylval.sval = strdup(yytext); return STRING_LITERAL; }
+"+"               { return PLUS; }
+"-"               { return MINUS; }
+"*"               { return MUL; }
+"/"               { return DIV; }
+"%"               { return MOD; }
 
-[a-zA-Z_][a-zA-Z0-9_]* { yylval.sval = strdup(yytext); return IDENTIFIER; }
+"."               { return DOT; }
+","               { return COMMA; }
+";"               { return SEMI; }
+":"               { return COLON; }
 
-"->"                { return ARROW; }
-"::"                { return SCOPE; }
-"=="                { return EQ; }
-"!="                { return NEQ; }
-"<="                { return LE; }
-">="                { return GE; }
-"<"                 { return LT; }
-">"                 { return GT; }
+"("               { return LPAREN; }
+")"               { return RPAREN; }
+"{"               { return LBRACE; }
+"}"               { return RBRACE; }
 
-[ \t\r\n]+          ;
-"//".* ;
-.                   { return yytext[0]; }
+{FLOAT}           { yylval.fval = std::strtod(yytext, nullptr); return FLOAT_LIT; }
+{INT}             { yylval.ival = (long long)std::strtoll(yytext, nullptr, 10); return INT_LIT; }
+
+{STR}             {
+                    std::string u = unescape_string(yytext);
+                    char* s = (char*)std::malloc(u.size() + 1);
+                    std::memcpy(s, u.c_str(), u.size() + 1);
+                    yylval.sval = s;
+                    return STRING_LIT;
+                  }
+
+{IDRE}            {
+                    char* s = dup_yytext();
+                    if (g_tm.lookup_class(s) != nullptr) {
+                        yylval.sval = s;
+                        return TYPE_NAME;
+                    }
+                    yylval.sval = s;
+                    return ID;
+                  }
+
+.                 { std::fprintf(stderr, "[LEX] Unknown char '%s' at line %d\n", yytext, yylineno); }
 
 %%
