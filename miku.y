@@ -16,7 +16,6 @@ extern FILE* yyin;
 void yyerror(const char* s);
 
 // -- Global Scoping & AST Variables --
-// We start with a Global Scope
 SymbolTable* globalScope = new SymbolTable("Global");
 SymbolTable* currentScope = globalScope;
 
@@ -66,7 +65,6 @@ vector<ASTNode*> mainStatements;
 %type <node> if_stmt while_stmt return_stmt delete_stmt break_stmt continue_stmt
 
 // -- Precedence (Resolves ambiguity) --
-// Lowest to Highest
 %left EQ NEQ LT LE GT GE
 %left '+' '-'
 %left '*' '/'
@@ -120,9 +118,6 @@ class_data_decl:
           // Exit Class Scope
           SymbolTable* old = currentScope;
           currentScope = currentScope->parent;
-          // We don't delete class scopes immediately in a real compiler 
-          // (to lookup fields later), but for this assignment we just exit.
-          // delete old; 
       }
     ;
 
@@ -238,13 +233,13 @@ stmt_list_no_decls:
 /* --- Statements --- */
 stmt_no_decl:
       assign_stmt   { $$ = $1; } // Returns AST
-    | expr_stmt     { $$ = NULL; }
-    | if_stmt       { $$ = NULL; }
-    | while_stmt    { $$ = NULL; }
-    | return_stmt   { $$ = NULL; }
-    | delete_stmt   { $$ = NULL; }
-    | break_stmt    { $$ = NULL; }
-    | continue_stmt { $$ = NULL; }
+    | expr_stmt     { $$ = nullptr; }
+    | if_stmt       { $$ = nullptr; } // Explicit nullptr to fix type clash
+    | while_stmt    { $$ = nullptr; }
+    | return_stmt   { $$ = nullptr; }
+    | delete_stmt   { $$ = nullptr; }
+    | break_stmt    { $$ = nullptr; }
+    | continue_stmt { $$ = nullptr; }
     | print_stmt    { $$ = $1; } // Returns AST
     ;
 
@@ -292,7 +287,7 @@ assign_stmt:
           $$ = new ASTNode(NODE_ASSIGN, varNode, $3);
           $$->dataType = (info ? info->type : TYPE_VOID);
       }
-    | field_access '=' expression ';' { $$ = NULL; /* No AST for complex types requested */ }
+    | field_access '=' expression ';' { $$ = nullptr; }
     ;
 
 /* --- Print (Part IV AST) --- */
@@ -303,20 +298,24 @@ print_stmt:
       }
     ;
 
-/* --- Control Flow (Null ASTs) --- */
+/* --- Control Flow (Fixed: explicitly return nullptr) --- */
 if_stmt:
-      WISH '(' expression ')' block_no_decls
-    | WISH '(' expression ')' block_no_decls REGRET block_no_decls
+      WISH '(' expression ')' block_no_decls { $$ = nullptr; }
+    | WISH '(' expression ')' block_no_decls REGRET block_no_decls { $$ = nullptr; }
     ;
 
 while_stmt:
-      ROLLING '(' expression ')' block_no_decls
+      ROLLING '(' expression ')' block_no_decls { $$ = nullptr; }
     ;
 
-return_stmt: OFFER expression ';' | OFFER ';' ;
-delete_stmt: ERASE IDENTIFIER ';' ;
-break_stmt: VANISH ';' ;
-continue_stmt: STEP ';' ;
+return_stmt: 
+      OFFER expression ';' { $$ = nullptr; }
+    | OFFER ';' { $$ = nullptr; }
+    ;
+
+delete_stmt: ERASE IDENTIFIER ';' { $$ = nullptr; } ;
+break_stmt: VANISH ';' { $$ = nullptr; } ;
+continue_stmt: STEP ';' { $$ = nullptr; } ;
 
 block_no_decls: '{' stmt_list_no_decls '}' ;
 
@@ -354,7 +353,6 @@ expression:
     // Unary Minus
     | '-' expression %prec UMINUS
       {
-          // Implement -X as (0 - X)
           ASTNode* zero = new ASTNode(NODE_CONST);
           zero->dataType = $2->dataType;
           if($2->dataType == TYPE_INT) zero->val.iVal = 0;
@@ -364,7 +362,7 @@ expression:
           $$->dataType = $2->dataType;
       }
 
-    // Boolean Logic (Added missing tokens)
+    // Boolean Logic
     | expression GT expression { $$ = new ASTNode(NODE_OP_GT, $1, $3); $$->dataType = TYPE_BOOL; }
     | expression LT expression { $$ = new ASTNode(NODE_OP_LT, $1, $3); $$->dataType = TYPE_BOOL; }
     | expression GE expression { $$ = new ASTNode(NODE_OP_GE, $1, $3); $$->dataType = TYPE_BOOL; }
@@ -376,7 +374,6 @@ expression:
 primary:
       IDENTIFIER 
       { 
-        // Part III: Check if ID exists
         SymbolInfo* info = currentScope->lookup($1);
         if (!info) { 
             char buf[100]; sprintf(buf, "Identifier '%s' not defined", $1); yyerror(buf);
@@ -403,7 +400,7 @@ primary:
     | BOOL_TRUE { $$ = new ASTNode(NODE_CONST); $$->val.type = TYPE_BOOL; $$->val.bVal = true; $$->dataType = TYPE_BOOL; }
     | BOOL_FALSE { $$ = new ASTNode(NODE_CONST); $$->val.type = TYPE_BOOL; $$->val.bVal = false; $$->dataType = TYPE_BOOL; }
     
-    | func_call { $$ = new ASTNode(NODE_OTHER); /* Func calls return OTHER in expression ASTs per spec */ }
+    | func_call { $$ = new ASTNode(NODE_OTHER); }
     | field_access { $$ = new ASTNode(NODE_OTHER); }
     ;
 
@@ -443,7 +440,7 @@ int main(int argc, char** argv) {
         if (!yyin) { perror("fopen"); return 1; }
     }
     
-    // Clear the output file for symbol tables
+    // Clear output file
     remove("tables.txt");
     
     printf("Starting Miku Compiler...\n");
