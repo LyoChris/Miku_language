@@ -1,73 +1,128 @@
 feat system;
 
-// --- 1. Class Definitions (Part I & II) ---
-MikuData Vocaloid {
-    id : leek,
-    power : rin
+// --- 1. Helper Functions ---
+
+// [TEST] Arithmetic
+track add_leeks(a: leek, b: leek) -> leek {
+    offer a + b;
 }
 
-// --- 2. Global Function (Part I & II) ---
-track calculate_sum(a: leek, b: leek) -> leek {
-    let res = 0;
-    res = a + b;
-    offer res;
+track multiply_rins(x: rin, y: rin) -> rin {
+    offer x * y;
 }
 
-// --- 3. Main Block (Part IV Execution) ---
-track world_is_mine() -> ghost {
-    // Declarations must be at the top of the block
-    let x = 10;
-    let y = 5;
-    let z = 0;
-    let pi = 3.14f;
-    let radius = 2.0f;
-    let area = 0.0f;
-    let is_diva = angel; // true
-    let is_virus = virus; // false
-    let counter = 3;
-    let message = "Miku Number: ";
-
-    // --- 4. Testing Print & Strings ---
-    tell_your_world("Welcome to Miku Language Test");
-
-    // --- 5. Testing Arithmetic Expressions (AST) ---
-    // x becomes 10 + 5 = 15
-    x = x + y; 
-    tell_your_world("x (10+5) is:");
-    tell_your_world(x);
-
-    // z becomes 15 * 2 = 30
-    z = x * 2;
-    tell_your_world("z (x*2) is:");
-    tell_your_world(z);
-
-    // Float arithmetic: area = 3.14 * 2.0 = 6.28
-    area = pi * radius; 
-    tell_your_world("Area (float) is:");
-    tell_your_world(area);
-
-    // --- 6. Testing Control Flow (If/Else) ---
-    // x is 15, so x > 10 is true
-    wish (x > 10) {
-        tell_your_world("Condition Met: x is greater than 10");
-    } 
+// [TEST] Logic & Branching
+track check_status(is_active: code) -> ghost {
+    tell_your_world("Checking status...");
+    wish (is_active == angel) {
+        tell_your_world("Status: ACTIVE (Angel)");
+    }
     regret {
-        tell_your_world("Condition Failed");
+        tell_your_world("Status: INACTIVE (Virus)");
     }
+}
 
-    // --- 7. Testing Boolean Logic ---
-    // 30 == 30 is true
-    wish (z == 30) {
-        tell_your_world("Logic Check: z equals 30");
+// [TEST] Loops
+track countdown(start: leek) -> ghost {
+    let i = start;
+    tell_your_world("--- Starting Countdown ---");
+    rolling (i > 0) {
+        tell_your_world(i);
+        i = i - 1;
     }
+    tell_your_world("Liftoff!");
+}
 
-    // --- 8. Testing Loop (While) ---
-    tell_your_world("Starting Countdown:");
+// [TEST] Recursion
+track factorial(n: leek) -> leek {
+    wish (n <= 1) {
+        offer 1;
+    }
+    offer n * factorial(n - 1);
+}
+
+// [TEST] Strings (Scrolls)
+track test_strings() -> ghost {
+    // Declaring 'msg' here is legal because this is a standard function, not Main.
+    let msg : scroll = "Miku is singing";
+    tell_your_world(msg);
     
-    rolling (counter > 0) {
-        tell_your_world(counter);
-        counter = counter - 1;
-    }
+    // Reassignment
+    msg = "Miku has finished singing.";
+    tell_your_world(msg);
+}
 
-    tell_your_world("Test Complete. Shutting down.");
+// [TEST] Scope
+track scope_test() -> ghost {
+    let x = 999;
+    tell_your_world("Inside scope_test, local x should be 999:");
+    tell_your_world(x);
+}
+
+// --- 2. Test Runner Wrapper ---
+// Variables are allowed here, so we declare them to capture results.
+track run_all_tests() -> ghost {
+    let i_res = 0;
+    let f_res = 0.0f;
+    let f_base = 3.5f;
+    let f_mult = 2.0f;
+    let fact_res = 0;
+    
+    tell_your_world(">>> MIKU LANGUAGE COMPREHENSIVE TEST SUITE <<<");
+    tell_your_world("----------------------------------------------");
+
+    // A. Arithmetic Tests
+    tell_your_world("[1] Testing Arithmetic:");
+    
+    i_res = add_leeks(10, 20);
+    tell_your_world("10 + 20 = (Expect 30)");
+    tell_your_world(i_res);
+
+    f_res = multiply_rins(f_base, f_mult);
+    tell_your_world("3.5 * 2.0 = (Expect 7.000000)");
+    tell_your_world(f_res);
+
+    tell_your_world("----------------------------------------------");
+
+    // B. Boolean Logic Tests
+    tell_your_world("[2] Testing Logic (Wish/Regret):");
+    check_status(angel); // Should print ACTIVE
+    check_status(virus); // Should print INACTIVE
+
+    tell_your_world("----------------------------------------------");
+
+    // C. Loop Tests
+    tell_your_world("[3] Testing Loops:");
+    countdown(3);
+
+    tell_your_world("----------------------------------------------");
+
+    // D. Recursion Tests
+    tell_your_world("[4] Testing Recursion (Factorial):");
+    fact_res = factorial(5);
+    tell_your_world("Factorial of 5 = (Expect 120)");
+    tell_your_world(fact_res);
+
+    tell_your_world("----------------------------------------------");
+
+    // E. String Type Tests
+    tell_your_world("[5] Testing Scrolls (Strings):");
+    test_strings();
+
+    tell_your_world("----------------------------------------------");
+
+    // F. Scope Tests
+    tell_your_world("[6] Testing Scope:");
+    scope_test();
+}
+
+// --- 3. Main Entry Point ---
+// STRICT RULE: No 'let' declarations allowed here.
+track world_is_mine() -> ghost {
+    tell_your_world(">>> System Initializing... <<<");
+    
+    // We delegate logic to the wrapper function where variables are legal.
+    run_all_tests();
+
+    tell_your_world(">>> System Shutdown. All Tests Passed. <<<");
 }

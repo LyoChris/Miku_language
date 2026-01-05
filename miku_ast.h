@@ -10,18 +10,10 @@
 
 using namespace std;
 
-// --- Data Types ---
 enum MikuType {
-    TYPE_VOID,
-    TYPE_INT,       // leek
-    TYPE_FLOAT,     // rin (float/double)
-    TYPE_STRING,    // scroll
-    TYPE_BOOL,      // code
-    TYPE_CLASS,
-    TYPE_UNKNOWN
+    TYPE_VOID, TYPE_INT, TYPE_FLOAT, TYPE_STRING, TYPE_BOOL, TYPE_CLASS, TYPE_UNKNOWN
 };
 
-// --- Value Wrapper (Part IV) ---
 class MikuValue {
 public:
     MikuType type;
@@ -29,21 +21,26 @@ public:
     double fVal;
     string sVal;
     bool bVal;
+    bool isReturn; // FIX: Flag to propagate return values up the AST
 
-    MikuValue() : type(TYPE_VOID), iVal(0), fVal(0.0), bVal(false) {}
-    
-    // Helpers for printing and operations
+    MikuValue() : type(TYPE_VOID), iVal(0), fVal(0.0), bVal(false), isReturn(false) {}
     string toString() const;
 };
 
-// --- Symbol Table (Part II) ---
+// Forward declaration
+class ASTNode;
+class SymbolTable; 
+
 struct SymbolInfo {
     string name;
     MikuType type;
-    string customTypeName; // For classes
-    MikuValue value;       // Current value
+    MikuValue value;
     bool isFunction;
-    vector<MikuType> paramTypes; // For functions
+    vector<MikuType> paramTypes;
+    vector<string> paramNames; // FIX: Store parameter names to bind arguments
+    
+    ASTNode* funcBody = nullptr; 
+    SymbolTable* definitionScope = nullptr; 
 };
 
 class SymbolTable {
@@ -55,39 +52,44 @@ public:
     SymbolTable(string name, SymbolTable* p = nullptr);
     ~SymbolTable();
 
-    bool addSymbol(string name, MikuType type, string customType = "");
-    bool addFunction(string name, MikuType returnType, vector<MikuType> params);
+    bool addSymbol(string name, MikuType type);
+    bool addFunction(string name, MikuType returnType, vector<MikuType> params, vector<string> paramNames);
     SymbolInfo* lookup(string name);
     void printTable(const string& filename);
 };
 
-// --- AST Nodes (Part IV) ---
 enum NodeType {
-    NODE_CONST,
-    NODE_VAR,
+    NODE_CONST, NODE_VAR, 
     NODE_OP_ADD, NODE_OP_SUB, NODE_OP_MUL, NODE_OP_DIV,
     NODE_OP_GT, NODE_OP_LT, NODE_OP_GE, NODE_OP_LE, NODE_OP_EQ, NODE_OP_NEQ,
-    NODE_ASSIGN,
-    NODE_PRINT,
-    NODE_OTHER // For unsupported ops in eval (like func calls in expressions)
+    NODE_ASSIGN, NODE_PRINT, 
+    
+    NODE_SEQ,       
+    NODE_IF,        
+    NODE_WHILE,     
+    NODE_FUNC_CALL, 
+    NODE_OTHER,
+    
+    NODE_RETURN,    // FIX: New node for 'offer'
+    NODE_DECL,      // FIX: New node for 'let' (runtime declaration)
+    NODE_ARG_LIST   // FIX: New node to chain arguments
 };
 
 class ASTNode {
 public:
     NodeType nodeType;
     MikuType dataType;
-    MikuValue val;          // For constants
-    string varName;         // For variables/assign
-    ASTNode *left, *right;
+    MikuValue val;
+    string varName;
+    
+    ASTNode *left, *right, *aux; 
 
-    ASTNode(NodeType nt, ASTNode* l = nullptr, ASTNode* r = nullptr);
+    ASTNode(NodeType nt, ASTNode* l = nullptr, ASTNode* r = nullptr, ASTNode* a = nullptr);
     virtual ~ASTNode();
 
-    // The Eval function (Part IV)
     MikuValue eval(SymbolTable* scope); 
 };
 
-// Helper for type conversion strings
 string typeToString(MikuType t);
 
 #endif
