@@ -210,8 +210,10 @@ main_decl:
     ;
 
 /* --- Blocks --- */
+// Regular functions can have local variables
 func_block: '{' local_decls stmt_list_no_decls '}' ;
 
+// Main block: STRICTLY NO local variables allowed (Part I Syntax Constraint)
 main_block: '{' stmt_list_main '}' ;
 
 // Special stmt list for main to collect AST nodes
@@ -234,7 +236,7 @@ stmt_list_no_decls:
 stmt_no_decl:
       assign_stmt   { $$ = $1; } // Returns AST
     | expr_stmt     { $$ = nullptr; }
-    | if_stmt       { $$ = nullptr; } // Explicit nullptr to fix type clash
+    | if_stmt       { $$ = nullptr; } 
     | while_stmt    { $$ = nullptr; }
     | return_stmt   { $$ = nullptr; }
     | delete_stmt   { $$ = nullptr; }
@@ -425,7 +427,23 @@ type_name:
 
 param_list_opt: | param_list;
 param_list: param | param_list ',' param;
-param: IDENTIFIER ':' type_name | LUKA_PTR IDENTIFIER;
+
+// --- PARAM FIXED: Registers symbols in scope ---
+param: 
+      IDENTIFIER ':' type_name 
+      {
+          if(!currentScope->addSymbol($1, $3)) {
+              char buf[100]; sprintf(buf, "Parameter '%s' redeclared", $1); yyerror(buf);
+          }
+      }
+    | LUKA_PTR IDENTIFIER 
+      {
+          if(!currentScope->addSymbol($2, TYPE_VOID)) {
+               char buf[100]; sprintf(buf, "Parameter '%s' redeclared", $2); yyerror(buf);
+          }
+      }
+    ;
+
 return_type: { $$ = TYPE_VOID; } | ARROW type_name { $$ = $2; };
 
 %%
