@@ -1,0 +1,9 @@
+feat system;
+
+track run_tests() -> ghost {
+    wish (angel) {
+        let x = 1; // must FAIL by spec
+        tell_your_world(x);
+    }
+}
+track world_is_mine() -> ghost { run_tests(); }

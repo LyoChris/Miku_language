@@ -1,0 +1,21 @@
+feat system;
+
+track fact(n: leek) -> leek {
+    wish (n <= 1) { offer 1; }
+    offer n * fact(n - 1);
+}
+
+track fib(n: leek) -> leek {
+    wish (n <= 1) { offer n; }
+    offer fib(n - 1) + fib(n - 2);
+}
+
+track run_tests() -> ghost {
+    tell_your_world("== TEST 03 ==");
+    tell_your_world(fact(6)); // 720
+    tell_your_world(fib(7));  // 13
+}
+
+track world_is_mine() -> ghost {
+    run_tests();
+}

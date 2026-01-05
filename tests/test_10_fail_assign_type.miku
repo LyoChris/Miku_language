@@ -1,0 +1,8 @@
+feat system;
+
+track run_tests() -> ghost {
+    let a : leek = 1;
+    a = 2.0f;
+}
+
+track world_is_mine() -> ghost { run_tests(); }

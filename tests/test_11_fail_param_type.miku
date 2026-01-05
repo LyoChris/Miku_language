@@ -1,0 +1,9 @@
+feat system;
+
+track add(a: leek, b: leek) -> leek { offer a + b; }
+
+track run_tests() -> ghost {
+    tell_your_world(add(1, 2.0f));
+}
+
+track world_is_mine() -> ghost { run_tests(); }

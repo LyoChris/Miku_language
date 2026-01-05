@@ -1,76 +1,107 @@
-/* ============================================================================
- * miku.y  (Bison grammar)  — spec-driven
- *
- * Key design points implemented:
- *  1) Ambiguity fix (no shift/reduce on ID):
- *       - Types that are class names are returned by the lexer as TYPE_NAME
- *       - Normal identifiers are returned as ID
- *
- *  2) Execution model (per spec):
- *       - Only in MAIN we evaluate AST statements.
- *       - Only ASSIGN and PRINT statements produce AST nodes (and are evaluated).
- *       - if/while/calls/field access are type-checked but do not produce AST.
- *
- *  3) Return (offer) rules:
- *       - offer is allowed in functions/methods, including nested blocks (if/while)
- *       - offer is NOT allowed in main, including inside main's if/while blocks
- * ========================================================================== */
-
 %{
 #include "miku_ast.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 extern int yylineno;
 int yylex(void);
 void yyerror(const char* s);
+
+static Program* g_program = nullptr;
 %}
 
-/* ----------------------------------------------------------------------------
- * Semantic value union
- * -------------------------------------------------------------------------- */
-%union {
-    long long ival;
-    double    fval;
-    int       bval;   /* 0/1 for bool */
-    char*     sval;
+/* IMPORTANT:
+   Tot ce apare în %union trebuie să fie cunoscut când se compilează miku.tab.hpp.
+   De aceea punem helper-structs aici (în header), și includem miku_ast.h tot aici.
+*/
+%code requires {
+#include "miku_ast.h"
+#include <string>
+#include <vector>
 
-    Type*     typep;
-    ExprInfo* expr;
-    ASTNode*  ast;
-    ParamList* params;
-    ArgList*  args;
+/* tmp pentru lvalue (a.b.c) */
+struct LValTmp {
+    int line{0};
+    std::vector<std::string> parts;
+};
+
+/* tmp pentru init-uri în literal de struct:  T { x: expr, y: expr } */
+struct FieldInitTmp {
+    std::string name;
+    Expr* expr{nullptr};
+};
+
+/* tmp pentru field declaration:  x: Type;  (țin Type* ca să nu cerem trivially-copyable în union) */
+struct FieldDeclTmp {
+    std::string name;
+    Type* ty{nullptr};
+};
+
+/* tmp pentru un struct */
+struct StructTmp {
+    std::string name;
+    std::vector<FieldDeclTmp*> fields;
+    std::vector<Function*> methods;
+};
+
+/* tmp pentru toate item-urile globale => elimină reduce/reduce */
+struct GlobalTmp {
+    std::vector<StructTmp*> structs;
+    std::vector<Function*> funcs;
+};
 }
 
-/* ----------------------------------------------------------------------------
- * Tokens
- * -------------------------------------------------------------------------- */
+%union {
+    long long ival;
+    double fval;
+    char* sval;
 
-/* keywords */
-%token KW_INT KW_FLOAT KW_STRING KW_BOOL
-%token KW_CLASS KW_FUNC KW_MAIN KW_RETURN KW_IF KW_ELSE KW_WHILE KW_NEW
+    Type* typep;
+
+    Expr* expr;
+    Stmt* stmt;
+    Block* block;
+    Function* func;
+
+    std::vector<Expr*>* exprs;
+    std::vector<Stmt*>* stmts;
+    std::vector<Param>* params;
+
+    LValTmp* lval;
+    std::vector<FieldInitTmp>* inits;
+
+    FieldDeclTmp* fdecl;
+    StructTmp* stmp;
+
+    GlobalTmp* gtmp;
+}
+
+/* ===== tokens ===== */
+%token KW_FEAT KW_SYSTEM
+%token KW_MIKUDATA
+%token KW_TRACK KW_LET KW_WISH KW_REGRET KW_ROLLING KW_OFFER
 %token KW_PRINT
+%token KW_SUMMON
 
-/* literals + identifiers */
+%token KW_LEEK KW_RIN KW_SCROLL KW_CODE KW_GHOST
+%token ANGEL VIRUS
+
 %token <ival> INT_LIT
 %token <fval> FLOAT_LIT
-%token <bval> BOOL_LIT
 %token <sval> STRING_LIT
 %token <sval> ID
-%token <sval> TYPE_NAME   /* returned by lexer when ID matches a known class */
+%token <sval> TYPE_NAME
 
-/* operators + punctuation */
-%token ASSIGN ARROW
+%token ARROW
+%token ASSIGN
 %token PLUS MINUS MUL DIV MOD
 %token EQ NEQ LT GT LE GE
 %token AND OR NOT
 %token DOT COMMA SEMI COLON
 %token LPAREN RPAREN LBRACE RBRACE
 
-/* ----------------------------------------------------------------------------
- * Precedence (classic)
- * -------------------------------------------------------------------------- */
 %left OR
 %left AND
 %nonassoc EQ NEQ LT GT LE GE
@@ -79,525 +110,446 @@ void yyerror(const char* s);
 %right NOT
 %right UMINUS
 
-/* ----------------------------------------------------------------------------
- * Types for nonterminals
- * -------------------------------------------------------------------------- */
 %type <typep> type
-%type <expr>  expr atom postfix call_expr object_new
-%type <ast>   assign_stmt print_stmt
-%type <ast>   stmt_main stmt_func
 
-%type <args>   arg_list_opt arg_list
+%type <expr> expr atom postfix call struct_lit summon_expr
+%type <exprs> arg_list_opt arg_list
+
+%type <stmt> stmt let_stmt assign_stmt print_stmt expr_stmt if_stmt while_stmt return_stmt
+%type <stmts> stmt_list
+
+%type <block> block
 %type <params> param_list_opt param_list
+
+%type <func> func_def method_def
+
+%type <lval> lvalue
+%type <inits> field_inits_opt field_inits
+
+%type <stmp> struct_def struct_members
+%type <fdecl> field_decl
+
+%type <gtmp> global_items
+
+/* destructori utili pe erori (nu strică dacă ai parse errors) */
+%destructor { std::free($$); } <sval>
+%destructor { delete $$; } <typep>
+%destructor { delete $$; } <lval>
+%destructor { delete $$; } <inits>
+%destructor {
+    if ($$) { delete $$->ty; delete $$; }
+} <fdecl>
+%destructor {
+    if ($$) {
+        for (auto* f : $$->fields) { if (f) { delete f->ty; delete f; } }
+        for (auto* m : $$->methods) { delete m; }
+        delete $$;
+    }
+} <stmp>
+%destructor {
+    if ($$) {
+        for (auto* st : $$->structs) {
+            if (!st) continue;
+            for (auto* f : st->fields) { if (f) { delete f->ty; delete f; } }
+            for (auto* m : st->methods) { delete m; }
+            delete st;
+        }
+        for (auto* fn : $$->funcs) delete fn;
+        delete $$;
+    }
+} <gtmp>
 
 %%
 
-/* ============================================================================
- * Top level
- * ========================================================================== */
-
 program
-    : global_items main_block
+    : opt_feat global_items
+      {
+        g_program = new Program();
+
+        for (auto* st : $2->structs) {
+            auto sd = std::make_unique<StructDef>();
+            sd->name = st->name;
+
+            for (auto* f : st->fields) {
+                sd->fields.push_back(FieldDef{f->name, *f->ty});
+                delete f->ty;
+                delete f;
+            }
+            st->fields.clear();
+
+            for (auto* m : st->methods) {
+                m->is_method = true;
+                m->receiver = st->name;
+                sd->methods[m->name].reset(m);
+            }
+            st->methods.clear();
+
+            g_program->structs.emplace_back(std::move(sd));
+            delete st;
+        }
+        $2->structs.clear();
+
+        for (auto* fn : $2->funcs) {
+            g_program->funcs.emplace_back(fn);
+        }
+        $2->funcs.clear();
+
+        delete $2;
+        g_program->index();
+      }
+    ;
+
+opt_feat
+    : /* empty */
+    | KW_FEAT KW_SYSTEM SEMI
     ;
 
 global_items
+    : /* empty */ { $$ = new GlobalTmp(); }
+    | global_items struct_def
+      { $1->structs.push_back($2); $$ = $1; }
+    | global_items func_def
+      { $1->funcs.push_back($2); $$ = $1; }
+    ;
+
+/* ======== STRUCTS ======== */
+
+struct_def
+    : KW_MIKUDATA TYPE_NAME LBRACE struct_members RBRACE SEMI
+      {
+        $4->name = std::string($2);
+        std::free($2);
+        $$ = $4;
+      }
+    ;
+
+struct_members
     : /* empty */
-    | global_items global_item
-    ;
-
-global_item
-    : class_def
-    | func_def
-    | global_var_decl
-    ;
-
-/* ============================================================================
- * Global variables
- * ========================================================================== */
-
-global_var_decl
-    : type ID SEMI
+      { $$ = new StructTmp(); }
+    | struct_members field_decl
       {
-        Type t = *$1; delete $1;
-        std::string name($2); std::free($2);
-        /* global variable declaration */
-        declare_var(g_tm, yylineno, name, t, std::nullopt, /*isGlobal=*/true);
+        $1->fields.push_back($2);
+        $$ = $1;
       }
-    | type ID ASSIGN expr SEMI
+    | struct_members method_def
       {
-        Type t = *$1; delete $1;
-        std::string name($2); std::free($2);
-
-        /* optional init value (if evaluator supports it) */
-        std::optional<Value> initVal;
-        if ($4 && $4->type != t) {
-            semantic_error(g_tm, yylineno,
-                "Type mismatch in init of '" + name + "': declared " +
-                type_to_string(t) + " but got " + type_to_string($4->type));
-        }
-        if ($4 && $4->node) initVal = $4->node->eval(g_tm);
-
-        declare_var(g_tm, yylineno, name, t, initVal, /*isGlobal=*/true);
-        destroy_exprinfo($4);
+        $1->methods.push_back($2);
+        $$ = $1;
       }
     ;
 
-/* ============================================================================
- * Classes (global scope only)
- * ========================================================================== */
-
-class_def
-    : KW_CLASS ID
+field_decl
+    : ID COLON type SEMI
       {
-        std::string cname($2); std::free($2);
-        declare_class_begin(g_tm, yylineno, cname);
-      }
-      LBRACE class_members RBRACE SEMI
-      {
-        declare_class_end(g_tm);
+        auto* f = new FieldDeclTmp();
+        f->name = std::string($1);
+        std::free($1);
+        f->ty = $3;     /* Type* */
+        $$ = f;
       }
     ;
-
-class_members
-    : /* empty */
-    | class_members class_member
-    ;
-
-class_member
-    : type ID SEMI
-      {
-        Type t = *$1; delete $1;
-        std::string field($2); std::free($2);
-
-        /* current class context should be stored in g_tm;
-           if your function expects class name, pass it here instead of "" */
-        declare_class_field(g_tm, yylineno, /*className=*/"", field, t);
-      }
-    | method_def
-    ;
-
-/* ============================================================================
- * Methods (inside class)
- * ========================================================================== */
 
 method_def
-    : KW_FUNC ID LPAREN param_list_opt RPAREN ARROW type
+    : KW_TRACK ID LPAREN param_list_opt RPAREN ARROW type block
       {
-        std::string mname($2); std::free($2);
-        Type ret = *$7; delete $7;
-        ParamList params = *$4; destroy_paramlist($4);
+        auto* fn = new Function();
+        fn->name = std::string($2);
+        std::free($2);
 
-        declare_method(g_tm, yylineno, /*className=*/"", mname, ret, params);
+        fn->params = *$4;
+        delete $4;
 
-        /* enter method scope and bind params */
-        g_tm.push_scope("method:" + mname);
-        for (const auto& p : params.v) {
-            declare_var(g_tm, p.line, p.name, p.type, std::nullopt, /*isGlobal=*/false);
-        }
-      }
-      func_block
-      {
-        g_tm.pop_scope();
+        fn->ret = *$7;
+        delete $7;
+
+        fn->body.reset($8);
+        $$ = fn;
       }
     ;
 
-/* ============================================================================
- * Functions (global scope)
- * ========================================================================== */
+/* ======== FUNCTIONS ======== */
 
 func_def
-    : KW_FUNC ID LPAREN param_list_opt RPAREN ARROW type
+    : KW_TRACK ID LPAREN param_list_opt RPAREN ARROW type block
       {
-        std::string fname($2); std::free($2);
-        Type ret = *$7; delete $7;
-        ParamList params = *$4; destroy_paramlist($4);
+        auto* fn = new Function();
+        fn->name = std::string($2);
+        std::free($2);
 
-        declare_func(g_tm, yylineno, fname, ret, params);
+        fn->params = *$4;
+        delete $4;
 
-        /* enter function scope and bind params */
-        g_tm.push_scope("func:" + fname);
-        for (const auto& p : params.v) {
-            declare_var(g_tm, p.line, p.name, p.type, std::nullopt, /*isGlobal=*/false);
-        }
-      }
-      func_block
-      {
-        g_tm.pop_scope();
+        fn->ret = *$7;
+        delete $7;
+
+        fn->body.reset($8);
+        $$ = fn;
       }
     ;
 
-/* ============================================================================
- * Function block: local decls allowed ONLY at start
- * ========================================================================== */
-
-func_block
-    : LBRACE local_decls stmt_list_func RBRACE
-    ;
-
-/* locals allowed only before statements */
-local_decls
-    : /* empty */
-    | local_decls local_decl
-    ;
-
-local_decl
-    : type ID SEMI
-      {
-        Type t = *$1; delete $1;
-        std::string name($2); std::free($2);
-        declare_var(g_tm, yylineno, name, t, std::nullopt, /*isGlobal=*/false);
-      }
-    | type ID ASSIGN expr SEMI
-      {
-        Type t = *$1; delete $1;
-        std::string name($2); std::free($2);
-
-        std::optional<Value> initVal;
-        if ($4 && $4->type != t) {
-            semantic_error(g_tm, yylineno,
-                "Type mismatch in init of '" + name + "': declared " +
-                type_to_string(t) + " but got " + type_to_string($4->type));
-        }
-        if ($4 && $4->node) initVal = $4->node->eval(g_tm);
-
-        declare_var(g_tm, yylineno, name, t, initVal, /*isGlobal=*/false);
-        destroy_exprinfo($4);
-      }
-    ;
-
-/* ============================================================================
- * Main block: NO declarations allowed, and statements are evaluated
- * ========================================================================== */
-
-main_block
-    : KW_MAIN LBRACE main_stmt_list RBRACE
-    ;
-
-/* In main: each stmt_main that yields AST (assign/print) is eval-ed */
-main_stmt_list
-    : /* empty */
-    | main_stmt_list stmt_main
-      {
-        if ($2) { $2->eval(g_tm); delete $2; }
-      }
-    ;
-
-/* ============================================================================
- * Statement lists inside FUNCTIONS (not executed by evaluator)
- * ========================================================================== */
-
-/* In functions: we parse + typecheck, but do NOT execute.
-   We still delete any AST we might have created. */
-stmt_list_func
-    : /* empty */
-    | stmt_list_func stmt_func
-      {
-        if ($2) delete $2;
-      }
-    ;
-
-/* ============================================================================
- * MAIN statements (no return, no decls)
- *   - assign + print produce AST
- *   - if/while/call exist but do not produce AST
- * ========================================================================== */
-
-stmt_main
-    : assign_stmt              { $$ = $1; }
-    | print_stmt               { $$ = $1; }
-    | call_stmt                { $$ = nullptr; }
-    | if_stmt_main             { $$ = nullptr; }
-    | while_stmt_main          { $$ = nullptr; }
-    ;
-
-/* MAIN if/while blocks must also NOT allow return */
-if_stmt_main
-    : KW_IF LPAREN expr RPAREN block_no_decls_main else_opt_main
-      {
-        if ($3 && $3->type.kind != Type::Kind::BOOL) {
-            semantic_error(g_tm, $3->line,
-                "if() condition must be bool, got " + type_to_string($3->type));
-        }
-        destroy_exprinfo($3);
-      }
-    ;
-
-else_opt_main
-    : /* empty */
-    | KW_ELSE block_no_decls_main
-    ;
-
-while_stmt_main
-    : KW_WHILE LPAREN expr RPAREN block_no_decls_main
-      {
-        if ($3 && $3->type.kind != Type::Kind::BOOL) {
-            semantic_error(g_tm, $3->line,
-                "while() condition must be bool, got " + type_to_string($3->type));
-        }
-        destroy_exprinfo($3);
-      }
-    ;
-
-/* MAIN blocks: no decls, and only stmt_main allowed inside */
-block_no_decls_main
-    : LBRACE stmt_list_no_decls_main RBRACE
-    ;
-
-stmt_list_no_decls_main
-    : /* empty */
-    | stmt_list_no_decls_main stmt_main
-      {
-        /* main evaluates only the top-level stmt_main list;
-           inside blocks, spec says if/while are not executed anyway.
-           So we just delete AST if any. */
-        if ($2) delete $2;
-      }
-    ;
-
-/* ============================================================================
- * FUNCTION statements (return allowed anywhere, but still no decls inside blocks)
- * ========================================================================== */
-
-stmt_func
-    : assign_stmt              { $$ = $1; }
-    | print_stmt               { $$ = $1; }
-    | call_stmt                { $$ = nullptr; }
-    | if_stmt_func             { $$ = nullptr; }
-    | while_stmt_func          { $$ = nullptr; }
-    | return_stmt              { $$ = nullptr; }
-    ;
-
-/* FUNCTION if/while blocks allow return inside */
-if_stmt_func
-    : KW_IF LPAREN expr RPAREN block_no_decls_func else_opt_func
-      {
-        if ($3 && $3->type.kind != Type::Kind::BOOL) {
-            semantic_error(g_tm, $3->line,
-                "if() condition must be bool, got " + type_to_string($3->type));
-        }
-        destroy_exprinfo($3);
-      }
-    ;
-
-else_opt_func
-    : /* empty */
-    | KW_ELSE block_no_decls_func
-    ;
-
-while_stmt_func
-    : KW_WHILE LPAREN expr RPAREN block_no_decls_func
-      {
-        if ($3 && $3->type.kind != Type::Kind::BOOL) {
-            semantic_error(g_tm, $3->line,
-                "while() condition must be bool, got " + type_to_string($3->type));
-        }
-        destroy_exprinfo($3);
-      }
-    ;
-
-/* FUNCTION blocks: no decls, but stmt_func allowed inside */
-block_no_decls_func
-    : LBRACE stmt_list_no_decls_func RBRACE
-    ;
-
-stmt_list_no_decls_func
-    : /* empty */
-    | stmt_list_no_decls_func stmt_func
-      {
-        if ($2) delete $2;
-      }
-    ;
-
-/* ============================================================================
- * Concrete statements that can appear in main/funcs
- * ========================================================================== */
-
-/* Call statement: parsed + checked, but no AST per spec */
-call_stmt
-    : call_expr SEMI
-      {
-        destroy_exprinfo($1);
-      }
-    ;
-
-/* Return statement: allowed only in func/method rules above */
-return_stmt
-    : KW_RETURN expr SEMI { destroy_exprinfo($2); }
-    | KW_RETURN SEMI      { }
-    ;
-
-/* Assignment statement: produces AST node, eval-ed in MAIN only */
-assign_stmt
-    : ID ASSIGN expr SEMI
-      {
-        std::string name($1); std::free($1);
-
-        /* left side must be declared variable */
-        ExprInfo* idinfo = make_ident(g_tm, yylineno, name);
-        ASTNode* rhs = ($3 ? $3->node : ASTNode::other(yylineno, Type::Error()));
-
-        if (!idinfo || idinfo->type.kind == Type::Kind::ERROR) {
-            $$ = ASTNode::assign(yylineno, name, Type::Error(), rhs);
-        } else {
-            if ($3 && idinfo->type != $3->type) {
-                semantic_error(g_tm, yylineno,
-                    "Type mismatch in assignment to '" + name + "': left " +
-                    type_to_string(idinfo->type) + ", right " + type_to_string($3->type));
-            }
-            $$ = ASTNode::assign(yylineno, name, idinfo->type, rhs);
-        }
-
-        destroy_exprinfo(idinfo);
-        if ($3) { $3->node = nullptr; destroy_exprinfo($3); }
-      }
-    ;
-
-/* Print statement: produces AST node, eval-ed in MAIN only */
-print_stmt
-    : KW_PRINT LPAREN expr RPAREN SEMI
-      {
-        ASTNode* e = ($3 ? $3->node : ASTNode::other(yylineno, Type::Error()));
-        $$ = ASTNode::print(yylineno, e);
-
-        if ($3) { $3->node = nullptr; destroy_exprinfo($3); }
-      }
-    ;
-
-/* ============================================================================
- * Expressions
- * ========================================================================== */
-
-expr
-    : expr PLUS expr        { $$ = make_binary_expr(g_tm, yylineno, "+",  $1, $3); }
-    | expr MINUS expr       { $$ = make_binary_expr(g_tm, yylineno, "-",  $1, $3); }
-    | expr MUL expr         { $$ = make_binary_expr(g_tm, yylineno, "*",  $1, $3); }
-    | expr DIV expr         { $$ = make_binary_expr(g_tm, yylineno, "/",  $1, $3); }
-    | expr MOD expr         { $$ = make_binary_expr(g_tm, yylineno, "%",  $1, $3); }
-
-    | expr EQ expr          { $$ = make_binary_expr(g_tm, yylineno, "==", $1, $3); }
-    | expr NEQ expr         { $$ = make_binary_expr(g_tm, yylineno, "!=", $1, $3); }
-    | expr LT expr          { $$ = make_binary_expr(g_tm, yylineno, "<",  $1, $3); }
-    | expr LE expr          { $$ = make_binary_expr(g_tm, yylineno, "<=", $1, $3); }
-    | expr GT expr          { $$ = make_binary_expr(g_tm, yylineno, ">",  $1, $3); }
-    | expr GE expr          { $$ = make_binary_expr(g_tm, yylineno, ">=", $1, $3); }
-
-    | expr AND expr         { $$ = make_binary_expr(g_tm, yylineno, "&&", $1, $3); }
-    | expr OR expr          { $$ = make_binary_expr(g_tm, yylineno, "||", $1, $3); }
-
-    | NOT expr              { $$ = make_unary_expr (g_tm, yylineno, "!",  $2); }
-    | MINUS expr %prec UMINUS
-                            { $$ = make_unary_expr (g_tm, yylineno, "u-", $2); }
-
-    | postfix               { $$ = $1; }
-    ;
-
-/* atom: base values */
-atom
-    : INT_LIT               { $$ = make_lit_int   (yylineno, $1); }
-    | FLOAT_LIT             { $$ = make_lit_float (yylineno, $1); }
-    | BOOL_LIT              { $$ = make_lit_bool  (yylineno, $1 != 0); }
-    | STRING_LIT            { std::string s($1); std::free($1); $$ = make_lit_string(yylineno, s); }
-    | ID                    { std::string n($1); std::free($1); $$ = make_ident(g_tm, yylineno, n); }
-    | LPAREN expr RPAREN    { $$ = $2; }
-    | call_expr             { $$ = $1; }
-    | object_new            { $$ = $1; }
-    ;
-
-/* postfix: field access / method call become OTHER leaves by spec,
-   but we still type-check and compute resulting type */
-postfix
-    : atom { $$ = $1; }
-
-    | postfix DOT ID
-      {
-        std::string field($3); std::free($3);
-        ExprInfo* out = make_other_from_field_access(g_tm, yylineno, *$1, field);
-        destroy_exprinfo($1);
-        $$ = out;
-      }
-
-    | postfix DOT ID LPAREN arg_list_opt RPAREN
-      {
-        std::string m($3); std::free($3);
-        ArgList args = *$5; destroy_arglist($5);
-        ExprInfo* out = make_other_from_method_call(g_tm, yylineno, *$1, m, args);
-        destroy_exprinfo($1);
-        $$ = out;
-      }
-    ;
-
-/* free function call: OTHER leaf */
-call_expr
-    : ID LPAREN arg_list_opt RPAREN
-      {
-        std::string fname($1); std::free($1);
-        ArgList args = *$3; destroy_arglist($3);
-        $$ = make_other_from_func_call(g_tm, yylineno, fname, args);
-      }
-    ;
-
-/* object creation: OTHER leaf */
-object_new
-    : KW_NEW TYPE_NAME LPAREN RPAREN
-      {
-        std::string cname($2); std::free($2);
-        $$ = make_other_from_object_new(g_tm, yylineno, cname);
-      }
-    ;
-
-/* args */
-arg_list_opt
-    : /* empty */           { $$ = arglist_empty(); }
-    | arg_list              { $$ = $1; }
-    ;
-
-arg_list
-    : expr                  { $$ = arglist_single($1); }
-    | arg_list COMMA expr    { $$ = arglist_append($1, $3); }
-    ;
-
-/* ============================================================================
- * Parameters
- * ========================================================================== */
+/* ======== PARAMS / TYPES ======== */
 
 param_list_opt
-    : /* empty */             { $$ = paramlist_empty(); }
-    | param_list              { $$ = $1; }
+    : /* empty */ { $$ = new std::vector<Param>(); }
+    | param_list  { $$ = $1; }
     ;
 
 param_list
     : ID COLON type
       {
-        std::string n($1); std::free($1);
-        Type t = *$3; delete $3;
-        $$ = paramlist_single(n, t, yylineno);
+        auto* p = new std::vector<Param>();
+        p->push_back(Param{std::string($1), *$3});
+        std::free($1);
+        delete $3;
+        $$ = p;
       }
     | param_list COMMA ID COLON type
       {
-        std::string n($3); std::free($3);
-        Type t = *$5; delete $5;
-        $$ = paramlist_append($1, n, t, yylineno);
+        $1->push_back(Param{std::string($3), *$5});
+        std::free($3);
+        delete $5;
+        $$ = $1;
       }
     ;
 
-/* ============================================================================
- * Types
- * ========================================================================== */
-
 type
-    : KW_INT                 { $$ = new Type(Type::Int()); }
-    | KW_FLOAT               { $$ = new Type(Type::Float()); }
-    | KW_STRING              { $$ = new Type(Type::String()); }
-    | KW_BOOL                { $$ = new Type(Type::Bool()); }
-    | TYPE_NAME
+    : KW_LEEK   { $$ = new Type(Type::Leek()); }
+    | KW_RIN    { $$ = new Type(Type::Rin()); }
+    | KW_SCROLL { $$ = new Type(Type::Scroll()); }
+    | KW_CODE   { $$ = new Type(Type::Code()); }
+    | KW_GHOST  { $$ = new Type(Type::Ghost()); }
+    | TYPE_NAME { $$ = new Type(Type::Struct(std::string($1))); std::free($1); }
+    ;
+
+/* ======== BLOCKS / STATEMENTS ======== */
+
+block
+    : LBRACE stmt_list RBRACE
       {
-        std::string tn($1); std::free($1);
-        Type t = resolve_type_name(g_tm, yylineno, tn);
-        $$ = new Type(t);
+        auto* b = new Block(yylineno);
+        for (auto* s : *$2) b->stmts.emplace_back(s);
+        delete $2;
+        $$ = b;
       }
+    ;
+
+stmt_list
+    : /* empty */ { $$ = new std::vector<Stmt*>(); }
+    | stmt_list stmt
+      { $1->push_back($2); $$ = $1; }
+    ;
+
+stmt
+    : let_stmt    { $$ = $1; }
+    | assign_stmt { $$ = $1; }
+    | print_stmt  { $$ = $1; }
+    | if_stmt     { $$ = $1; }
+    | while_stmt  { $$ = $1; }
+    | return_stmt { $$ = $1; }
+    | expr_stmt   { $$ = $1; }
+    ;
+
+let_stmt
+    : KW_LET ID ASSIGN expr SEMI
+      {
+        $$ = new StmtLet(yylineno, std::string($2), std::nullopt, ExprPtr($4));
+        std::free($2);
+      }
+    | KW_LET ID COLON type ASSIGN expr SEMI
+      {
+        $$ = new StmtLet(yylineno, std::string($2), std::optional<Type>(* $4), ExprPtr($6));
+        std::free($2);
+        delete $4;
+      }
+    ;
+
+lvalue
+    : ID
+      {
+        auto* lv = new LValTmp();
+        lv->line = yylineno;
+        lv->parts.push_back(std::string($1));
+        std::free($1);
+        $$ = lv;
+      }
+    | lvalue DOT ID
+      {
+        $1->parts.push_back(std::string($3));
+        std::free($3);
+        $$ = $1;
+      }
+    ;
+
+assign_stmt
+    : lvalue ASSIGN expr SEMI
+      {
+        auto lv = std::make_unique<LValue>();
+        lv->line = $1->line;
+        lv->parts = std::move($1->parts);
+        delete $1;
+        $$ = new StmtAssign(yylineno, std::move(lv), ExprPtr($3));
+      }
+    ;
+
+print_stmt
+    : KW_PRINT LPAREN expr RPAREN SEMI
+      { $$ = new StmtPrint(yylineno, ExprPtr($3)); }
+    ;
+
+expr_stmt
+    : expr SEMI
+      { $$ = new StmtExpr(yylineno, ExprPtr($1)); }
+    ;
+
+if_stmt
+    : KW_WISH LPAREN expr RPAREN block
+      { $$ = new StmtIf(yylineno, ExprPtr($3), std::unique_ptr<Block>($5), nullptr); }
+    | KW_WISH LPAREN expr RPAREN block KW_REGRET block
+      { $$ = new StmtIf(yylineno, ExprPtr($3), std::unique_ptr<Block>($5), std::unique_ptr<Block>($7)); }
+    ;
+
+while_stmt
+    : KW_ROLLING LPAREN expr RPAREN block
+      { $$ = new StmtWhile(yylineno, ExprPtr($3), std::unique_ptr<Block>($5)); }
+    ;
+
+return_stmt
+    : KW_OFFER SEMI
+      { $$ = new StmtReturn(yylineno, std::nullopt); }
+    | KW_OFFER expr SEMI
+      {
+        std::optional<ExprPtr> ex;
+        ex.emplace(ExprPtr($2));
+        $$ = new StmtReturn(yylineno, std::move(ex));
+      }
+    ;
+
+/* ======== EXPRESSIONS ======== */
+
+expr
+    : expr PLUS expr   { $$ = new ExprBin(yylineno, BinOp::Add, ExprPtr($1), ExprPtr($3)); }
+    | expr MINUS expr  { $$ = new ExprBin(yylineno, BinOp::Sub, ExprPtr($1), ExprPtr($3)); }
+    | expr MUL expr    { $$ = new ExprBin(yylineno, BinOp::Mul, ExprPtr($1), ExprPtr($3)); }
+    | expr DIV expr    { $$ = new ExprBin(yylineno, BinOp::Div, ExprPtr($1), ExprPtr($3)); }
+    | expr MOD expr    { $$ = new ExprBin(yylineno, BinOp::Mod, ExprPtr($1), ExprPtr($3)); }
+
+    | expr EQ expr     { $$ = new ExprBin(yylineno, BinOp::Eq,  ExprPtr($1), ExprPtr($3)); }
+    | expr NEQ expr    { $$ = new ExprBin(yylineno, BinOp::Neq, ExprPtr($1), ExprPtr($3)); }
+    | expr LT expr     { $$ = new ExprBin(yylineno, BinOp::Lt,  ExprPtr($1), ExprPtr($3)); }
+    | expr LE expr     { $$ = new ExprBin(yylineno, BinOp::Le,  ExprPtr($1), ExprPtr($3)); }
+    | expr GT expr     { $$ = new ExprBin(yylineno, BinOp::Gt,  ExprPtr($1), ExprPtr($3)); }
+    | expr GE expr     { $$ = new ExprBin(yylineno, BinOp::Ge,  ExprPtr($1), ExprPtr($3)); }
+
+    | expr AND expr    { $$ = new ExprBin(yylineno, BinOp::And, ExprPtr($1), ExprPtr($3)); }
+    | expr OR expr     { $$ = new ExprBin(yylineno, BinOp::Or,  ExprPtr($1), ExprPtr($3)); }
+
+    | NOT expr         { $$ = new ExprUn(yylineno, UnOp::Not, ExprPtr($2)); }
+    | MINUS expr %prec UMINUS { $$ = new ExprUn(yylineno, UnOp::Neg, ExprPtr($2)); }
+
+    | postfix          { $$ = $1; }
+    ;
+
+postfix
+    : atom { $$ = $1; }
+    | postfix DOT ID
+      { $$ = new ExprField(yylineno, ExprPtr($1), std::string($3)); std::free($3); }
+    | postfix DOT ID LPAREN arg_list_opt RPAREN
+      {
+        std::vector<ExprPtr> args;
+        for (auto* e : *$5) args.emplace_back(e);
+        delete $5;
+        $$ = new ExprMethodCall(yylineno, ExprPtr($1), std::string($3), std::move(args));
+        std::free($3);
+      }
+    ;
+
+atom
+    : INT_LIT           { $$ = new ExprInt(yylineno, $1); }
+    | FLOAT_LIT         { $$ = new ExprFloat(yylineno, $1); }
+    | STRING_LIT        { $$ = new ExprString(yylineno, std::string($1)); std::free($1); }
+    | ANGEL             { $$ = new ExprBool(yylineno, true); }
+    | VIRUS             { $$ = new ExprBool(yylineno, false); }
+    | ID                { $$ = new ExprVar(yylineno, std::string($1)); std::free($1); }
+    | call              { $$ = $1; }
+    | struct_lit        { $$ = $1; }
+    | summon_expr       { $$ = $1; }
+    | LPAREN expr RPAREN { $$ = $2; }
+    ;
+
+call
+    : ID LPAREN arg_list_opt RPAREN
+      {
+        std::vector<ExprPtr> args;
+        for (auto* e : *$3) args.emplace_back(e);
+        delete $3;
+        $$ = new ExprCall(yylineno, std::string($1), std::move(args));
+        std::free($1);
+      }
+    ;
+
+summon_expr
+    : KW_SUMMON TYPE_NAME LPAREN RPAREN
+      { $$ = new ExprSummon(yylineno, std::string($2)); std::free($2); }
+    ;
+
+struct_lit
+    : TYPE_NAME LBRACE field_inits_opt RBRACE
+      {
+        std::vector<FieldInit> v;
+        for (auto& it : *$3) {
+            FieldInit fi;
+            fi.name = it.name;
+            fi.expr.reset(it.expr);
+            v.push_back(std::move(fi));
+        }
+        delete $3;
+        $$ = new ExprStructLit(yylineno, std::string($1), std::move(v));
+        std::free($1);
+      }
+    ;
+
+field_inits_opt
+    : /* empty */ { $$ = new std::vector<FieldInitTmp>(); }
+    | field_inits { $$ = $1; }
+    ;
+
+field_inits
+    : ID COLON expr
+      {
+        auto* v = new std::vector<FieldInitTmp>();
+        FieldInitTmp it;
+        it.name = std::string($1);
+        std::free($1);
+        it.expr = $3;
+        v->push_back(std::move(it));
+        $$ = v;
+      }
+    | field_inits COMMA ID COLON expr
+      {
+        FieldInitTmp it;
+        it.name = std::string($3);
+        std::free($3);
+        it.expr = $5;
+        $1->push_back(std::move(it));
+        $$ = $1;
+      }
+    ;
+
+arg_list_opt
+    : /* empty */ { $$ = new std::vector<Expr*>(); }
+    | arg_list    { $$ = $1; }
+    ;
+
+arg_list
+    : expr
+      { auto* v = new std::vector<Expr*>(); v->push_back($1); $$ = v; }
+    | arg_list COMMA expr
+      { $1->push_back($3); $$ = $1; }
     ;
 
 %%
+
+Program* miku_get_program() { return g_program; }
 
 void yyerror(const char* s) {
     std::fprintf(stderr, "[PARSE] %s at line %d\n", s, yylineno);

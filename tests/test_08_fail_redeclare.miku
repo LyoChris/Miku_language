@@ -1,0 +1,9 @@
+feat system;
+
+track run_tests() -> ghost {
+    let a = 1;
+    let a = 2; // must FAIL now
+    tell_your_world(a);
+}
+
+track world_is_mine() -> ghost { run_tests(); }

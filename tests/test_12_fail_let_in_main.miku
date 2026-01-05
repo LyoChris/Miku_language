@@ -1,0 +1,6 @@
+feat system;
+
+track world_is_mine() -> ghost {
+    let x = 1; // must FAIL
+    tell_your_world(x);
+}

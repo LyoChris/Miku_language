@@ -1,0 +1,134 @@
+feat system;
+
+MikuData Counter {
+    value: leek;
+
+    track inc_by(step: leek, times: leek) -> leek {
+        let i = 0;
+        let v = value;
+        rolling (i < times) {
+            v = v + step;
+            i = i + 1;
+        }
+        offer v;
+    }
+
+    track describe() -> ghost {
+        tell_your_world("Counter.describe()");
+        tell_your_world(value);
+    }
+};
+
+MikuData MathBox {
+    base: leek;
+
+    track tri(n: leek) -> leek {
+        let i = 1;
+        let s = 0;
+        rolling (i <= n) {
+            s = s + i;
+            i = i + 1;
+        }
+        offer s;
+    }
+
+    track max2(a: leek, b: leek) -> leek {
+        wish (a > b) {
+            offer a;
+        }
+        regret {
+            offer b;
+        }
+    }
+};
+
+track factorial(n: leek) -> leek {
+    wish (n <= 1) {
+        offer 1;
+    }
+    offer n * factorial(n - 1);
+}
+
+track fib(n: leek) -> leek {
+    wish (n <= 1) {
+        offer n;
+    }
+    offer fib(n - 1) + fib(n - 2);
+}
+
+track gcd_sub(a: leek, b: leek) -> leek {
+    let x = a;
+    let y = b;
+    rolling (x != y) {
+        wish (x > y) {
+            x = x - y;
+        }
+        regret {
+            y = y - x;
+        }
+    }
+    offer x;
+}
+
+track sum_squares(n: leek) -> leek {
+    let i = 1;
+    let acc = 0;
+    rolling (i <= n) {
+        acc = acc + (i * i);
+        i = i + 1;
+    }
+    offer acc;
+}
+
+track countdown(start: leek) -> ghost {
+    let i = start;
+    rolling (i > 0) {
+        tell_your_world(i);
+        i = i - 1;
+    }
+    tell_your_world("Liftoff");
+}
+
+track run_all() -> ghost {
+    tell_your_world("=== START COMPLEX TEST ===");
+
+    tell_your_world("factorial(6)");
+    tell_your_world(factorial(6));
+
+    tell_your_world("fib(7)");
+    tell_your_world(fib(7));
+
+    tell_your_world("gcd_sub(48,18)");
+    tell_your_world(gcd_sub(48, 18));
+
+    tell_your_world("sum_squares(5)");
+    tell_your_world(sum_squares(5));
+
+    tell_your_world("Countdown");
+    countdown(3);
+
+    let x = 10;
+    wish (x > 0) {
+        tell_your_world("x positive");
+        wish (x > 5) {
+            tell_your_world("x > 5");
+        }
+        regret {
+            tell_your_world("x <= 5");
+        }
+    }
+    regret {
+        tell_your_world("x not positive");
+    }
+
+    let t = 1.5f;
+    let u = 2.0f;
+    tell_your_world("float add");
+    tell_your_world(t + u);
+
+    tell_your_world("=== END COMPLEX TEST ===");
+}
+
+track world_is_mine() -> ghost {
+    run_all();
+}

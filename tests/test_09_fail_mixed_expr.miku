@@ -1,0 +1,9 @@
+feat system;
+
+track run_tests() -> ghost {
+    let a = 1;
+    let b = 2.0f;
+    tell_your_world(a + b);
+}
+
+track world_is_mine() -> ghost { run_tests(); }

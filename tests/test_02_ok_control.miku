@@ -1,0 +1,31 @@
+feat system;
+
+track run_tests() -> ghost {
+    tell_your_world("== TEST 02 ==");
+
+    let i = 0;
+    let sum = 0;
+
+    rolling (i < 5) {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    tell_your_world(sum); // 10
+
+    wish (sum == 10) {
+        tell_your_world("sum is 10");
+    }
+    regret {
+        tell_your_world("sum is not 10");
+    }
+
+    wish (angel) {
+        wish (virus) { tell_your_world("no"); }
+        regret { tell_your_world("yes"); }
+    }
+}
+
+track world_is_mine() -> ghost {
+    run_tests();
+}

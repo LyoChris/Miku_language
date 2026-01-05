@@ -1,0 +1,33 @@
+feat system;
+
+MikuData Person {
+    name: scroll;
+    age: leek;
+
+    track birthday() -> leek {
+        offer self.age + 1;
+    }
+
+    track greet(tag: scroll) -> scroll {
+        offer "Hi " + self.name + " " + tag;
+    }
+};
+
+track run_tests() -> ghost {
+    tell_your_world("== TEST 04 ==");
+
+    let p = summon Person();
+    tell_your_world(p.name); // ""
+    tell_your_world(p.age);  // 0
+
+    p = Person { name: "Miku", age: 16 };
+    tell_your_world(p.name);
+    tell_your_world(p.age);
+
+    tell_your_world(p.birthday());     // 17
+    tell_your_world(p.greet("!"));     // Hi Miku !
+}
+
+track world_is_mine() -> ghost {
+    run_tests();
+}

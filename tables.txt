@@ -1,114 +1,18 @@
-Miku Language - Symbol Tables
+=== SYMBOL TABLES ===
 
-=== SymbolTable: global ===
-Parent: NULL
-Variables:
-  miku : class(Vocaloid) = <Vocaloid> (decl line 72)
-  gFlag : bool = true (decl line 12)
-  gTitle : string = World is Mine (decl line 11)
-  song1 : class(Song) = <Song> (decl line 73)
-  gTempo : float = 120.5 (decl line 10)
-  gCounter : int = 17 (decl line 9)
-Functions:
-  complex_math(int x, int y) -> int (decl line 67)
-  mix_flags(bool a, bool b) -> bool (decl line 62)
-  eq_str(string a, string b) -> bool (decl line 57)
-  add(int a, int b) -> int (decl line 52)
+[SCOPE] global
+  structs:
+    - Person
+  functions:
+    - run_tests() -> ghost
+    - world_is_mine() -> ghost
 
-=== SymbolTable: class:Vocaloid ===
-Parent: global
-Variables:
-  active : bool = false (decl line 18)
-  age : int = 0 (decl line 17)
-  name : string =  (decl line 16)
-Functions:
-  years_from(int now) -> int (decl line 30)
-  greet(string who) -> string (decl line 20)
+[SCOPE] struct Person
+  fields:
+    - name : scroll
+    - age : leek
+  methods:
+    - greet(tag:scroll) -> scroll
+    - birthday() -> leek
 
-=== SymbolTable: method:greet ===
-Parent: class:Vocaloid
-Variables:
-  msg : string = Hi (decl line 21)
-  who : string =  (decl line 20)
-Functions:
-  (none)
-
-=== SymbolTable: method:years_from ===
-Parent: class:Vocaloid
-Variables:
-  diff : int = 0 (decl line 31)
-  now : int = 0 (decl line 30)
-Functions:
-  (none)
-
-=== SymbolTable: class:Song ===
-Parent: global
-Variables:
-  bpm : int = 0 (decl line 39)
-  length : float = 0 (decl line 38)
-  title : string =  (decl line 37)
-Functions:
-  is_fast(int limit) -> bool (decl line 41)
-
-=== SymbolTable: method:is_fast ===
-Parent: class:Song
-Variables:
-  res : bool = true (decl line 42)
-  limit : int = 0 (decl line 41)
-Functions:
-  (none)
-
-=== SymbolTable: func:add ===
-Parent: global
-Variables:
-  s : int = 0 (decl line 53)
-  b : int = 0 (decl line 52)
-  a : int = 0 (decl line 52)
-Functions:
-  (none)
-
-=== SymbolTable: func:eq_str ===
-Parent: global
-Variables:
-  ok : bool = true (decl line 58)
-  b : string =  (decl line 57)
-  a : string =  (decl line 57)
-Functions:
-  (none)
-
-=== SymbolTable: func:mix_flags ===
-Parent: global
-Variables:
-  r : bool = false (decl line 63)
-  b : bool = false (decl line 62)
-  a : bool = false (decl line 62)
-Functions:
-  (none)
-
-=== SymbolTable: func:complex_math ===
-Parent: global
-Variables:
-  r : int = 0 (decl line 68)
-  y : int = 0 (decl line 67)
-  x : int = 0 (decl line 67)
-Functions:
-  (none)
-
-=== Global Classes Registry ===
-Class Song (decl line 36)
-  Fields:
-    bpm : int
-    length : float
-    title : string
-  Methods:
-    is_fast(int) -> bool
-
-Class Vocaloid (decl line 15)
-  Fields:
-    active : bool
-    age : int
-    name : string
-  Methods:
-    years_from(int) -> int
-    greet(string) -> string
-
+=== END ===

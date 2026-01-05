@@ -1,0 +1,10 @@
+feat system;
+
+MikuData A { x: leek; };
+
+track run_tests() -> ghost {
+    let a = A { x: 1 };
+    tell_your_world(a.nope(2));
+}
+
+track world_is_mine() -> ghost { run_tests(); }

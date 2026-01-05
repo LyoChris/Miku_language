@@ -1,0 +1,30 @@
+feat system;
+
+track run_tests() -> ghost {
+    tell_your_world("== TEST 01 ==");
+
+    let a = 7;
+    let b = 3;
+    tell_your_world(a + b);          // 10
+    tell_your_world(a * (b + 2));    // 35
+    tell_your_world((10 % 4) + 1);   // 3
+
+    let x = 1.5f;
+    let y = 2.0f;
+    tell_your_world(x + y);          // 3.5
+    tell_your_world(x * y);          // 3
+
+    let s = "mi";
+    let t = "ku";
+    tell_your_world(s + t);          // miku
+
+    let ok = angel;
+    tell_your_world(ok && virus);    // false
+    tell_your_world(ok || virus);    // true
+}
+
+track world_is_mine() -> ghost {
+    tell_your_world("[START]");
+    run_tests();
+    tell_your_world("[END]");
+}
