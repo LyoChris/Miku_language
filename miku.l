@@ -1,56 +1,59 @@
 %{
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <iostream>
+#include <string>
+#include <cstring>
+#include "miku_ast.h"
 #include "miku.tab.h"
+using namespace std;
 %}
 
 %option noyywrap
+%option yylineno
 
 %%
 
-"feat"              { return FEAT; } // include (use)
+"feat"              { return FEAT; }
 
-"MikuData"          { return MIKUDATA; } // struct
-"MikuClass"         { return MIKUCLASS; } // class
-"MikuSee"           { return MIKUSEE; } // public
-"MikuBlind"         { return MIKUBLIND; } // private
+"MikuData"          { return MIKUDATA; }
+"MikuClass"         { return MIKUCLASS; }
+"MikuSee"           { return MIKUSEE; }
+"MikuBlind"         { return MIKUBLIND; }
 
-"track"             { return TRACK; } // function 
-"let"               { return LET; } // let (in rust)
+"track"             { return TRACK; }
+"let"               { return LET; }
 
-"wish"              { return WISH; } // if
-"regret"            { return REGRET; } // else
-"rolling"           { return ROLLING; } // while
-"vanish"            { return VANISH; } // break
-"step"              { return STEP; } //continue
+"wish"              { return WISH; }
+"regret"            { return REGRET; }
+"rolling"           { return ROLLING; }
+"vanish"            { return VANISH; }
+"step"              { return STEP; }
 
-"offer"             { return OFFER; } // return
-"erase"             { return ERASE; } // delete 
+"offer"             { return OFFER; }
+"erase"             { return ERASE; }
 
-"tell_your_world"   { return PRINT; } // print
+"tell_your_world"   { return PRINT; }
 
-"world_is_mine"     { return MAIN; } // main
+"world_is_mine"     { return MAIN; }
 
-"leek"              { return TYPE_LEEK; } // int
-"scroll"            { return TYPE_SCROLL; } // string
-"code"              { return TYPE_CODE; } // bool
-"ghost"             { return TYPE_GHOST; } // void
-"rin"               { return TYPE_RIN; } // float
-"len"               { return TYPE_LEN; } // double
-"luka"              { return LUKA_PTR; } // pointer
+"leek"              { return TYPE_LEEK; }
+"scroll"            { return TYPE_SCROLL; }
+"code"              { return TYPE_CODE; }
+"ghost"             { return TYPE_GHOST; }
+"rin"               { return TYPE_RIN; }
+"len"               { return TYPE_LEN; }
+"luka"              { return LUKA_PTR; }
 
-"angel"             { return BOOL_TRUE; } // true
-"virus"             { return BOOL_FALSE; } // false
-"self"              { return SELF; } // seld
+"angel"             { yylval.bval = true; return BOOL_TRUE; }
+"virus"             { yylval.bval = false; return BOOL_FALSE; }
+"self"              { return SELF; }
 
-[0-9]+\.[0-9]+[fF]      { yylval.fval = atof(yytext); return LITERAL_RIN; } // float
-[0-9]+\.[0-9]+          { yylval.fval = atof(yytext); return LITERAL_LEN; } // double
-[0-9]+                  { yylval.ival = atoi(yytext); return INT_LITERAL; } // int
+[0-9]+\.[0-9]+[fF]      { yylval.fval = atof(yytext); return LITERAL_RIN; }
+[0-9]+\.[0-9]+          { yylval.fval = atof(yytext); return LITERAL_LEN; }
+[0-9]+                  { yylval.ival = atoi(yytext); return INT_LITERAL; }
 
-\"([^\"\\]|\\.)*\"      { yylval.sval = strdup(yytext); return STRING_LITERAL; } // any string
+\"([^\"\\]|\\.)*\"      { yylval.sval = strdup(yytext); return STRING_LITERAL; }
 
-[a-zA-Z_][a-zA-Z0-9_]*  { yylval.sval = strdup(yytext); return IDENTIFIER; } // identifier 
+[a-zA-Z_][a-zA-Z0-9_]* { yylval.sval = strdup(yytext); return IDENTIFIER; }
 
 "->"                { return ARROW; }
 "::"                { return SCOPE; }
@@ -61,9 +64,8 @@
 "<"                 { return LT; }
 ">"                 { return GT; }
 
-[ \t\r\n]+          ; // spaces and whitespaces
-"//".*              ; // comments
-
-.                   { return yytext[0]; } // single character
+[ \t\r\n]+          ;
+"//".* ;
+.                   { return yytext[0]; }
 
 %%

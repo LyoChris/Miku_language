@@ -1,23 +1,44 @@
 %{
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstring>
+#include <cstdio>
+#include "miku_ast.h"
 
+using namespace std;
+
+// -- External references --
 extern int yylex();
-extern int yyparse();
+extern int yylineno;
 extern FILE* yyin;
 
 void yyerror(const char* s);
+
+// -- Global Scoping & AST Variables --
+// We start with a Global Scope
+SymbolTable* globalScope = new SymbolTable("Global");
+SymbolTable* currentScope = globalScope;
+
+// List to store AST nodes for the main block execution (Part IV)
+vector<ASTNode*> mainStatements;
+
 %}
 
-%union // data types
-{
+/* -- Yacc Definitions -- */
+
+%union {
     int ival;
     double fval;
     char* sval;
+    bool bval;
+    
+    // Pointers for C++ structures
+    ASTNode* node;
+    MikuType typeVal;
 }
 
-// keywords 
+// -- Keywords --
 %token FEAT MIKUDATA MIKUCLASS MIKUSEE MIKUBLIND
 %token TRACK LET
 %token WISH REGRET ROLLING VANISH STEP
@@ -25,20 +46,27 @@ void yyerror(const char* s);
 %token PRINT
 %token MAIN
 %token SELF
-%token BOOL_TRUE BOOL_FALSE
 
-// types
+// -- Types --
 %token TYPE_LEEK TYPE_SCROLL TYPE_CODE TYPE_GHOST LUKA_PTR TYPE_RIN TYPE_LEN
 
-// operators
-%token ARROW SCOPE EQ NEQ GT LT GE LE
+// -- Operators --
+%token ARROW SCOPE
+%token EQ NEQ GT LT GE LE
 
-// literals
+// -- Literals --
 %token <ival> INT_LITERAL
 %token <fval> LITERAL_RIN LITERAL_LEN
 %token <sval> STRING_LITERAL IDENTIFIER
+%token <bval> BOOL_TRUE BOOL_FALSE
 
-// prcedence (expresii de tip a < b == c and everything)
+// -- Non-Terminal Types --
+%type <typeVal> type_name return_type
+%type <node> expression primary assign_stmt print_stmt stmt_no_decl
+%type <node> if_stmt while_stmt return_stmt delete_stmt break_stmt continue_stmt
+
+// -- Precedence (Resolves ambiguity) --
+// Lowest to Highest
 %left EQ NEQ LT LE GT GE
 %left '+' '-'
 %left '*' '/'
@@ -46,17 +74,15 @@ void yyerror(const char* s);
 
 %%
 
-/* PROGRAM:
-   - global scope: imports, MikuData, MikuClass, normal functions
-   - mandatory main: track world_is_mine() ... { ... }
-   - inside main: NO `let ...` declarations
-*/
+/* =======================================================================
+   GRAMMAR RULES
+   ======================================================================= */
+
 program:
       global_decls main_decl
     ;
 
 global_decls:
-
     | global_decls global_decl
     ;
 
@@ -67,7 +93,7 @@ global_decl:
     | func_decl
     ;
 
-// imports
+/* --- Imports --- */
 feat_stmt:
       FEAT path ';'
     ;
@@ -78,132 +104,206 @@ path:
     | path '.' IDENTIFIER
     ;
 
-// structs / classes
+/* --- Class Data (MikuData) --- */
 class_data_decl:
-      MIKUDATA IDENTIFIER '{' field_list '}'
+      MIKUDATA IDENTIFIER '{' 
+      { 
+          // Part II: Create Class Scope
+          string name = $2;
+          if(currentScope->lookup(name)) yyerror("Class Identifier already defined");
+          
+          currentScope->addSymbol(name, TYPE_CLASS, name);
+          currentScope = new SymbolTable("Class_" + name, currentScope);
+      }
+      field_list '}' 
+      {
+          // Exit Class Scope
+          SymbolTable* old = currentScope;
+          currentScope = currentScope->parent;
+          // We don't delete class scopes immediately in a real compiler 
+          // (to lookup fields later), but for this assignment we just exit.
+          // delete old; 
+      }
     ;
 
 field_list:
-
     | field_list field_def
     ;
 
 field_def:
       IDENTIFIER ':' type_name
-    | IDENTIFIER ':' type_name ','
+      {
+          // Part III: Check for field redeclaration
+          if(!currentScope->addSymbol($1, $3)) {
+              char buf[100]; sprintf(buf, "Field '%s' redeclared", $1); yyerror(buf);
+          }
+      }
+    | IDENTIFIER ':' type_name ',' 
+      {
+          if(!currentScope->addSymbol($1, $3)) {
+              char buf[100]; sprintf(buf, "Field '%s' redeclared", $1); yyerror(buf);
+          }
+      }
     ;
 
-type_name:
-      TYPE_LEEK
-    | TYPE_SCROLL
-    | TYPE_CODE
-    | TYPE_GHOST
-    | TYPE_RIN
-    | TYPE_LEN
-    | LUKA_PTR
-    | IDENTIFIER
+/* --- Functions --- */
+func_decl:
+      TRACK IDENTIFIER '(' 
+      {
+         // Part II: Function Scope & Global Declaration
+         if(!currentScope->addFunction($2, TYPE_VOID, {})) { 
+             yyerror("Function identifier redeclared");
+         }
+         currentScope = new SymbolTable("Func_" + string($2), currentScope);
+      }
+      param_list_opt ')' return_type func_block
+      {
+         // Exit Scope
+         SymbolTable* old = currentScope;
+         currentScope = currentScope->parent;
+         delete old;
+      }
     ;
 
-// functions
+/* --- Class Implementation (Methods) --- */
 class_impl_decl:
       MIKUCLASS IDENTIFIER '{' method_list '}'
     ;
 
 method_list:
-
     | method_list method
     ;
 
-access_mod:
-      MIKUSEE
-    | MIKUBLIND
-    ;
-
 method:
-      access_mod TRACK IDENTIFIER '(' param_list_opt ')' return_type func_block
+      access_mod TRACK IDENTIFIER '(' 
+      {
+          currentScope = new SymbolTable("Method_" + string($3), currentScope);
+      }
+      param_list_opt ')' return_type func_block
+      {
+          SymbolTable* old = currentScope;
+          currentScope = currentScope->parent;
+          delete old;
+      }
     ;
 
-func_decl:
-      TRACK IDENTIFIER '(' param_list_opt ')' return_type func_block
-    ;
+access_mod: MIKUSEE | MIKUBLIND ;
 
-// main
+/* --- Main Function --- */
 main_decl:
-      TRACK MAIN '(' ')' return_type main_block
+      TRACK MAIN '(' ')' return_type 
+      {
+         // Enter Main Scope
+         currentScope = new SymbolTable("Main", currentScope);
+         mainStatements.clear();
+      }
+      main_block
+      {
+         // Part IV: Execution of Main Block
+         cout << endl << ">>> [RUNTIME] Executing Main Block via AST <<<" << endl;
+         for(ASTNode* node : mainStatements) {
+             if(node) {
+                 node->eval(currentScope);
+             }
+         }
+         
+         // Cleanup
+         SymbolTable* old = currentScope;
+         currentScope = currentScope->parent;
+         delete old;
+      }
     ;
 
-param_list_opt:
+/* --- Blocks --- */
+func_block: '{' local_decls stmt_list_no_decls '}' ;
 
-    | param_list
-    ;
+main_block: '{' stmt_list_main '}' ;
 
-param_list:
-      param
-    | param_list ',' param
-    ;
-
-param:
-      IDENTIFIER ':' type_name
-    | LUKA_PTR IDENTIFIER
-    | LUKA_PTR SELF
-    ;
-
-return_type:
-
-    | ARROW type_name
-    ;
-
-// Function block: locals only at the top 
-func_block:
-      '{' local_decls stmt_list_no_decls '}'
-    ;
-
-// Main block: no locals 
-main_block:
-      '{' stmt_list_no_decls '}'
+// Special stmt list for main to collect AST nodes
+stmt_list_main:
+    | stmt_list_main stmt_no_decl 
+    {
+        if ($2 != nullptr) mainStatements.push_back($2);
+    }
     ;
 
 local_decls:
-
     | local_decls var_decl
     ;
 
-// statements (no declarations here) 
 stmt_list_no_decls:
-
     | stmt_list_no_decls stmt_no_decl
     ;
 
+/* --- Statements --- */
 stmt_no_decl:
-      assign_stmt   
-    | expr_stmt
-    | if_stmt
-    | while_stmt
-    | return_stmt
-    | delete_stmt
-    | break_stmt
-    | continue_stmt
-    | print_stmt
+      assign_stmt   { $$ = $1; } // Returns AST
+    | expr_stmt     { $$ = NULL; }
+    | if_stmt       { $$ = NULL; }
+    | while_stmt    { $$ = NULL; }
+    | return_stmt   { $$ = NULL; }
+    | delete_stmt   { $$ = NULL; }
+    | break_stmt    { $$ = NULL; }
+    | continue_stmt { $$ = NULL; }
+    | print_stmt    { $$ = $1; } // Returns AST
     ;
 
-expr_stmt:
-      expression ';'
-    ;
+expr_stmt: expression ';' ;
 
-print_stmt:
-      PRINT '(' arg_list ')' ';'
-    ;
-
-// local var decl 
+/* --- Variable Declarations (Part III Checks) --- */
 var_decl:
       LET IDENTIFIER '=' expression ';'
+      {
+          // Infer type from expression
+          if (!currentScope->addSymbol($2, $4->dataType)) 
+             yyerror("Variable redeclared");
+      }
+    | LET IDENTIFIER ':' type_name '=' expression ';'
+      {
+          // Part III: Check type compatibility
+          if ($4 != $6->dataType) {
+             char buf[100]; 
+             sprintf(buf, "Type mismatch in declaration of '%s'", $2);
+             yyerror(buf);
+          }
+          
+          if (!currentScope->addSymbol($2, $4)) 
+             yyerror("Variable redeclared");
+      }
     ;
 
+/* --- Assignment (Part IV AST) --- */
 assign_stmt:
       IDENTIFIER '=' expression ';'
-    | field_access '=' expression ';'
+      {
+          // Part III: Semantic Analysis
+          SymbolInfo* info = currentScope->lookup($1);
+          if (!info) {
+              char buf[100]; sprintf(buf, "Variable '%s' not declared", $1); yyerror(buf);
+          } else if (info->type != $3->dataType) {
+              yyerror("Type mismatch in assignment");
+          }
+
+          // Part IV: Build AST (Node Assign)
+          // Left child is a VAR node holding the name
+          ASTNode* varNode = new ASTNode(NODE_VAR);
+          varNode->varName = $1;
+          
+          $$ = new ASTNode(NODE_ASSIGN, varNode, $3);
+          $$->dataType = (info ? info->type : TYPE_VOID);
+      }
+    | field_access '=' expression ';' { $$ = NULL; /* No AST for complex types requested */ }
     ;
 
+/* --- Print (Part IV AST) --- */
+print_stmt:
+      PRINT '(' expression ')' ';'
+      {
+          $$ = new ASTNode(NODE_PRINT, $3, nullptr);
+      }
+    ;
+
+/* --- Control Flow (Null ASTs) --- */
 if_stmt:
       WISH '(' expression ')' block_no_decls
     | WISH '(' expression ')' block_no_decls REGRET block_no_decls
@@ -213,120 +313,142 @@ while_stmt:
       ROLLING '(' expression ')' block_no_decls
     ;
 
-block_no_decls:
-      '{' stmt_list_no_decls '}'
-    ;
+return_stmt: OFFER expression ';' | OFFER ';' ;
+delete_stmt: ERASE IDENTIFIER ';' ;
+break_stmt: VANISH ';' ;
+continue_stmt: STEP ';' ;
 
-break_stmt:
-      VANISH ';'
-    ;
+block_no_decls: '{' stmt_list_no_decls '}' ;
 
-continue_stmt:
-      STEP ';'
-    ;
-
-return_stmt:
-      OFFER expression ';'
-    | OFFER ';'
-    ;
-
-delete_stmt:
-      ERASE IDENTIFIER ';'
-    ;
-
-// expressions 
+/* --- Expressions (Part IV AST Construction) --- */
 expression:
-      primary
-    | '(' expression ')'
+      primary { $$ = $1; }
+    | '(' expression ')' { $$ = $2; }
+    
+    // Arithmetic
+    | expression '+' expression 
+      { 
+        if ($1->dataType != $3->dataType) yyerror("Type mismatch in +");
+        $$ = new ASTNode(NODE_OP_ADD, $1, $3); 
+        $$->dataType = $1->dataType;
+      }
+    | expression '-' expression 
+      { 
+        if ($1->dataType != $3->dataType) yyerror("Type mismatch in -");
+        $$ = new ASTNode(NODE_OP_SUB, $1, $3); 
+        $$->dataType = $1->dataType;
+      }
+    | expression '*' expression 
+      { 
+        if ($1->dataType != $3->dataType) yyerror("Type mismatch in *");
+        $$ = new ASTNode(NODE_OP_MUL, $1, $3); 
+        $$->dataType = $1->dataType;
+      }
+    | expression '/' expression 
+      { 
+        if ($1->dataType != $3->dataType) yyerror("Type mismatch in /");
+        $$ = new ASTNode(NODE_OP_DIV, $1, $3); 
+        $$->dataType = $1->dataType;
+      }
+    
+    // Unary Minus
     | '-' expression %prec UMINUS
-    | expression '+' expression
-    | expression '-' expression
-    | expression '*' expression
-    | expression '/' expression
-    | expression GT expression
-    | expression GE expression
-    | expression LT expression
-    | expression LE expression
-    | expression EQ expression
-    | expression NEQ expression
+      {
+          // Implement -X as (0 - X)
+          ASTNode* zero = new ASTNode(NODE_CONST);
+          zero->dataType = $2->dataType;
+          if($2->dataType == TYPE_INT) zero->val.iVal = 0;
+          if($2->dataType == TYPE_FLOAT) zero->val.fVal = 0.0;
+          
+          $$ = new ASTNode(NODE_OP_SUB, zero, $2);
+          $$->dataType = $2->dataType;
+      }
+
+    // Boolean Logic (Added missing tokens)
+    | expression GT expression { $$ = new ASTNode(NODE_OP_GT, $1, $3); $$->dataType = TYPE_BOOL; }
+    | expression LT expression { $$ = new ASTNode(NODE_OP_LT, $1, $3); $$->dataType = TYPE_BOOL; }
+    | expression GE expression { $$ = new ASTNode(NODE_OP_GE, $1, $3); $$->dataType = TYPE_BOOL; }
+    | expression LE expression { $$ = new ASTNode(NODE_OP_LE, $1, $3); $$->dataType = TYPE_BOOL; }
+    | expression EQ expression { $$ = new ASTNode(NODE_OP_EQ, $1, $3); $$->dataType = TYPE_BOOL; }
+    | expression NEQ expression { $$ = new ASTNode(NODE_OP_NEQ, $1, $3); $$->dataType = TYPE_BOOL; }
     ;
 
 primary:
-      IDENTIFIER
-    | SELF
-    | INT_LITERAL
-    | LITERAL_RIN
-    | LITERAL_LEN
-    | STRING_LITERAL
-    | BOOL_TRUE
-    | BOOL_FALSE
-    | func_call
-    | struct_init
-    | field_access
+      IDENTIFIER 
+      { 
+        // Part III: Check if ID exists
+        SymbolInfo* info = currentScope->lookup($1);
+        if (!info) { 
+            char buf[100]; sprintf(buf, "Identifier '%s' not defined", $1); yyerror(buf);
+        }
+        
+        $$ = new ASTNode(NODE_VAR);
+        $$->varName = $1;
+        $$->dataType = info ? info->type : TYPE_UNKNOWN;
+      }
+    | INT_LITERAL 
+      { 
+        $$ = new ASTNode(NODE_CONST); 
+        $$->val.type = TYPE_INT; $$->val.iVal = $1; 
+        $$->dataType = TYPE_INT;
+      }
+    | LITERAL_RIN 
+      { 
+        $$ = new ASTNode(NODE_CONST); 
+        $$->val.type = TYPE_FLOAT; $$->val.fVal = $1; 
+        $$->dataType = TYPE_FLOAT;
+      }
+    | LITERAL_LEN { $$ = new ASTNode(NODE_CONST); $$->val.type = TYPE_FLOAT; $$->val.fVal = $1; $$->dataType = TYPE_FLOAT; }
+    | STRING_LITERAL { $$ = new ASTNode(NODE_CONST); $$->val.type = TYPE_STRING; $$->val.sVal = $1; $$->dataType = TYPE_STRING; }
+    | BOOL_TRUE { $$ = new ASTNode(NODE_CONST); $$->val.type = TYPE_BOOL; $$->val.bVal = true; $$->dataType = TYPE_BOOL; }
+    | BOOL_FALSE { $$ = new ASTNode(NODE_CONST); $$->val.type = TYPE_BOOL; $$->val.bVal = false; $$->dataType = TYPE_BOOL; }
+    
+    | func_call { $$ = new ASTNode(NODE_OTHER); /* Func calls return OTHER in expression ASTs per spec */ }
+    | field_access { $$ = new ASTNode(NODE_OTHER); }
     ;
 
-// object / method access 
 field_access:
       IDENTIFIER '.' IDENTIFIER
     | SELF '.' IDENTIFIER
     ;
 
-func_call:
-      IDENTIFIER '(' arg_list ')'
-    | IDENTIFIER SCOPE IDENTIFIER '(' arg_list ')'
-    | field_access '(' arg_list ')'
+func_call: IDENTIFIER '(' arg_list ')' ;
+arg_list: | arg_seq ;
+arg_seq: expression | arg_seq ',' expression ;
+
+type_name:
+      TYPE_LEEK { $$ = TYPE_INT; }
+    | TYPE_SCROLL { $$ = TYPE_STRING; }
+    | TYPE_CODE { $$ = TYPE_BOOL; }
+    | TYPE_RIN { $$ = TYPE_FLOAT; }
+    | TYPE_LEN { $$ = TYPE_FLOAT; }
+    | TYPE_GHOST { $$ = TYPE_VOID; }
+    | IDENTIFIER { $$ = TYPE_CLASS; } 
     ;
 
-// object init 
-struct_init:
-      IDENTIFIER '{' field_init_list_opt '}'
-    ;
-
-field_init_list_opt:
-
-    | field_init_list
-    ;
-
-field_init_list:
-      field_init
-    | field_init_list ',' field_init
-    | field_init_list ','             
-    ;
-
-field_init:
-      IDENTIFIER ':' expression
-    ;
-
-// args 
-arg_list:
-
-    | arg_seq
-    ;
-
-arg_seq:
-      expression
-    | arg_seq ',' expression
-    ;
+param_list_opt: | param_list;
+param_list: param | param_list ',' param;
+param: IDENTIFIER ':' type_name | LUKA_PTR IDENTIFIER;
+return_type: { $$ = TYPE_VOID; } | ARROW type_name { $$ = $2; };
 
 %%
 
-void yyerror(const char* s) 
-{
-    fprintf(stderr, "Miku Syntax Error: %s\n", s);
+void yyerror(const char* s) {
+    fprintf(stderr, "[Error] Line %d: %s\n", yylineno, s);
 }
 
-int main(int argc, char** argv) 
-{
-    if (argc > 1) 
-    {
+int main(int argc, char** argv) {
+    if (argc > 1) {
         yyin = fopen(argv[1], "r");
-        if (!yyin) 
-        {
-            perror("fopen"); return 1; 
-        }
+        if (!yyin) { perror("fopen"); return 1; }
     }
+    
+    // Clear the output file for symbol tables
+    remove("tables.txt");
+    
+    printf("Starting Miku Compiler...\n");
     yyparse();
-
-    printf("Completed successfully.\n");
+    printf("\nParsing completed.\nCheck 'tables.txt' for Symbol Table output.\n");
+    
     return 0;
 }
