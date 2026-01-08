@@ -6,11 +6,9 @@
 
 extern int yyparse(void);
 extern FILE* yyin;
-
-// must be provided by parser/driver
+\
 Program* miku_get_program();
 
-/* ---------------- tables.txt dump ---------------- */
 
 static void dump_tables(const Program& p, const char* path = "tables.txt") {
     std::ofstream out(path);
@@ -36,7 +34,6 @@ static void dump_tables(const Program& p, const char* path = "tables.txt") {
     }
     out << "\n";
 
-    // Struct scopes
     for (const auto& s : p.structs) {
         out << "[SCOPE] struct " << s->name << "\n";
 
@@ -61,7 +58,6 @@ static void dump_tables(const Program& p, const char* path = "tables.txt") {
     out << "=== END ===\n";
 }
 
-/* ---------------- run ---------------- */
 
 static void run_program(Program& p) {
     p.index();
@@ -74,10 +70,9 @@ static void run_program(Program& p) {
     Ctx ctx;
     ctx.prog = &p;
 
-    // Entry has 0 args by spec (your tests call run_tests from main)
     const Function& entry = *it->second;
     std::vector<Value> args;
-    (void)call_function(ctx, entry, args, /*line*/0, std::nullopt);
+    (void)call_function(ctx, entry, args, 0, std::nullopt);
 }
 
 int main(int argc, char** argv) {
@@ -105,13 +100,10 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        // build maps
         p->index();
 
-        // write tables.txt
         dump_tables(*p, "tables.txt");
 
-        // run
         run_program(*p);
 
     } catch (const RuntimeError& e) {

@@ -2,17 +2,8 @@
 
 [SCOPE] global
   structs:
-    - Person
   functions:
     - run_tests() -> ghost
     - world_is_mine() -> ghost
-
-[SCOPE] struct Person
-  fields:
-    - name : scroll
-    - age : leek
-  methods:
-    - greet(tag:scroll) -> scroll
-    - birthday() -> leek
 
 === END ===

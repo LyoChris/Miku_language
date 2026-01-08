@@ -12,41 +12,34 @@ void yyerror(const char* s);
 static Program* g_program = nullptr;
 %}
 
-/* IMPORTANT:
-   Tot ce apare în %union trebuie să fie cunoscut când se compilează miku.tab.hpp.
-   De aceea punem helper-structs aici (în header), și includem miku_ast.h tot aici.
-*/
 %code requires {
 #include "miku_ast.h"
 #include <string>
 #include <vector>
 
-/* tmp pentru lvalue (a.b.c) */
+
 struct LValTmp {
     int line{0};
     std::vector<std::string> parts;
 };
 
-/* tmp pentru init-uri în literal de struct:  T { x: expr, y: expr } */
 struct FieldInitTmp {
     std::string name;
     Expr* expr{nullptr};
 };
 
-/* tmp pentru field declaration:  x: Type;  (țin Type* ca să nu cerem trivially-copyable în union) */
 struct FieldDeclTmp {
     std::string name;
     Type* ty{nullptr};
 };
 
-/* tmp pentru un struct */
+
 struct StructTmp {
     std::string name;
     std::vector<FieldDeclTmp*> fields;
     std::vector<Function*> methods;
 };
 
-/* tmp pentru toate item-urile globale => elimină reduce/reduce */
 struct GlobalTmp {
     std::vector<StructTmp*> structs;
     std::vector<Function*> funcs;
@@ -78,7 +71,7 @@ struct GlobalTmp {
     GlobalTmp* gtmp;
 }
 
-/* ===== tokens ===== */
+//tokens
 %token KW_FEAT KW_SYSTEM
 %token KW_MIKUDATA
 %token KW_TRACK KW_LET KW_WISH KW_REGRET KW_ROLLING KW_OFFER
@@ -131,7 +124,7 @@ struct GlobalTmp {
 
 %type <gtmp> global_items
 
-/* destructori utili pe erori (nu strică dacă ai parse errors) */
+// destructori
 %destructor { std::free($$); } <sval>
 %destructor { delete $$; } <typep>
 %destructor { delete $$; } <lval>
@@ -200,7 +193,7 @@ program
     ;
 
 opt_feat
-    : /* empty */
+    : // empty
     | KW_FEAT KW_SYSTEM SEMI
     ;
 
@@ -212,8 +205,7 @@ global_items
       { $1->funcs.push_back($2); $$ = $1; }
     ;
 
-/* ======== STRUCTS ======== */
-
+// structs
 struct_def
     : KW_MIKUDATA TYPE_NAME LBRACE struct_members RBRACE SEMI
       {
@@ -224,7 +216,7 @@ struct_def
     ;
 
 struct_members
-    : /* empty */
+    : //empty
       { $$ = new StructTmp(); }
     | struct_members field_decl
       {
@@ -244,7 +236,7 @@ field_decl
         auto* f = new FieldDeclTmp();
         f->name = std::string($1);
         std::free($1);
-        f->ty = $3;     /* Type* */
+        f->ty = $3;
         $$ = f;
       }
     ;
@@ -267,8 +259,7 @@ method_def
       }
     ;
 
-/* ======== FUNCTIONS ======== */
-
+//functions
 func_def
     : KW_TRACK ID LPAREN param_list_opt RPAREN ARROW type block
       {
@@ -287,8 +278,7 @@ func_def
       }
     ;
 
-/* ======== PARAMS / TYPES ======== */
-
+// parameters
 param_list_opt
     : /* empty */ { $$ = new std::vector<Param>(); }
     | param_list  { $$ = $1; }
@@ -321,8 +311,7 @@ type
     | TYPE_NAME { $$ = new Type(Type::Struct(std::string($1))); std::free($1); }
     ;
 
-/* ======== BLOCKS / STATEMENTS ======== */
-
+//blocks and statements
 block
     : LBRACE stmt_list RBRACE
       {
@@ -424,8 +413,7 @@ return_stmt
       }
     ;
 
-/* ======== EXPRESSIONS ======== */
-
+//expressions
 expr
     : expr PLUS expr   { $$ = new ExprBin(yylineno, BinOp::Add, ExprPtr($1), ExprPtr($3)); }
     | expr MINUS expr  { $$ = new ExprBin(yylineno, BinOp::Sub, ExprPtr($1), ExprPtr($3)); }

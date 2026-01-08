@@ -42,7 +42,7 @@ struct RuntimeError : std::runtime_error {
 struct Type {
     enum class Kind { Leek, Rin, Scroll, Code, Ghost, Struct, Error };
     Kind kind{Kind::Error};
-    std::string name; // only for Struct
+    std::string name;
 
     static Type Leek()   { return {Kind::Leek,   ""}; }
     static Type Rin()    { return {Kind::Rin,    ""}; }
@@ -111,20 +111,19 @@ using StmtPtr  = std::unique_ptr<Stmt>;
 using BlockPtr = std::unique_ptr<Block>;
 
 struct Function {
-    std::string name;                 // function or method name
+    std::string name;
     std::vector<Param> params;
     Type ret{Type::Error()};
     BlockPtr body;
 
-    // method support
     bool is_method{false};
-    std::string receiver;             // struct name if method
+    std::string receiver;
 };
 
 struct StructDef {
     std::string name;
     std::vector<FieldDef> fields;
-    std::unordered_map<std::string, std::unique_ptr<Function>> methods; // by method name
+    std::unordered_map<std::string, std::unique_ptr<Function>> methods;
 
     const FieldDef* find_field(const std::string& f) const {
         for (auto& x : fields) if (x.name == f) return &x;
@@ -168,7 +167,6 @@ struct Ctx {
     Program* prog{nullptr};
 };
 
-/* ===================== Object / Env ===================== */
 
 struct Object {
     std::string struct_name;
@@ -225,7 +223,6 @@ struct Env {
     }
 };
 
-/* ===================== Default values ===================== */
 
 inline Value default_value(const Type& t, const Program& p) {
     switch (t.kind) {
@@ -245,7 +242,6 @@ inline Value default_value(const Type& t, const Program& p) {
     }
 }
 
-/* ===================== Expressions ===================== */
 
 struct Expr {
     int line{0};
@@ -377,7 +373,6 @@ struct ExprBin : Expr {
                 if (va.ty.kind==Type::Kind::Struct) return Value::code(std::get<std::shared_ptr<Object>>(va.v) == std::get<std::shared_ptr<Object>>(vb.v));
                 return Value::code(false);
 
-            /* FIX: Neq fără nullptr / fără crash */
             case BinOp::Neq:
                 if (va.ty != vb.ty) return Value::code(true);
                 if (va.ty.kind==Type::Kind::Leek)   return Value::code(std::get<int64_t>(va.v)!=std::get<int64_t>(vb.v));
@@ -498,7 +493,6 @@ struct ExprSummon : Expr {
     }
 };
 
-/* ===================== Statements / Blocks ===================== */
 
 struct Stmt {
     int line{0};
@@ -539,8 +533,7 @@ struct StmtLet : Stmt {
                            ": variable declarations are not allowed in main block");
     }
 
-    // Spec: local vars allowed in function scope, but NOT inside statement blocks (if/while)
-    // In this interpreter, statement blocks run in Env child(&env), so env.parent != nullptr means "inside a block".
+
     if (env.parent != nullptr) {
         throw RuntimeError("Line " + std::to_string(line) +
                            ": variable declarations are not allowed inside statement blocks");
@@ -552,18 +545,18 @@ struct StmtLet : Stmt {
                            " expected " + type_name(*ann) + " got " + type_name(v.ty));
     }
 
-    env.define(name, v); // now also rejects redeclare-in-same-scope
+    env.define(name, v);
 }
 
 };
 
 struct LValue {
     int line{0};
-    std::vector<std::string> parts; // ["a"] or ["a","b","c"] for a.b.c
+    std::vector<std::string> parts;
 };
 
 inline std::shared_ptr<Object> lvalue_get_obj(Ctx& ctx, Env& env, const LValue& lv) {
-    (void)ctx; // silence unused warning
+    (void)ctx;
 
     if (lv.parts.size() < 2) type_err(lv.line, "internal: expected field lvalue");
     Value cur = env.get(lv.parts[0]);
@@ -660,7 +653,6 @@ struct StmtReturn : Stmt {
     }
 };
 
-/* ===================== Call execution ===================== */
 
 inline Value call_function(Ctx& ctx, const Function& fn, const std::vector<Value>& args, int line, std::optional<Value> self_opt) {
     if (args.size() != fn.params.size()) {
